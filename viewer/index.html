@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>JARVIS · Knowledge Galaxy</title>
+<style>
+  :root {
+    --accent: #6fd8ff;
+    --accent-dim: #2a7f9e;
+    --ink: #e9f2fa;
+    --muted: #8fa3b5;
+    --panel-bg: rgba(8, 12, 18, 0.82);
+    --panel-border: rgba(111, 216, 255, 0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #000; color: var(--ink); overflow: hidden;
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* deep-space backdrop (sits behind the transparent WebGL canvas) */
+  body {
+    background:
+      radial-gradient(1100px 700px at 22% 18%, rgba(38, 84, 130, 0.30), transparent 62%),
+      radial-gradient(900px 620px at 82% 78%, rgba(86, 42, 120, 0.26), transparent 64%),
+      radial-gradient(700px 500px at 60% 40%, rgba(20, 60, 90, 0.20), transparent 70%),
+      #000;
+  }
+  #graph { position: fixed; inset: 0; z-index: 1; }
+  #graph canvas { display: block; outline: none; }
+
+  /* ---------------- HUD ---------------- */
+  #hud {
+    position: fixed; top: 20px; left: 24px; z-index: 6;
+    pointer-events: none; user-select: none;
+  }
+  #hud .mark {
+    font-size: 26px; font-weight: 200; letter-spacing: 0.42em;
+    text-transform: uppercase; color: #eaf6ff;
+    text-shadow: 0 0 26px rgba(111, 216, 255, 0.55);
+  }
+  #hud .sub {
+    margin-top: 6px; font-size: 11.5px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  #hud .sub b { color: var(--accent); font-weight: 500; }
+
+  /* ---------------- legend ---------------- */
+  #legend {
+    position: fixed; left: 24px; bottom: 22px; z-index: 6;
+    display: flex; flex-direction: column; gap: 7px;
+    pointer-events: none; user-select: none;
+  }
+  #legend .row {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  #legend .dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 12px currentColor; background: currentColor; }
+
+  /* ---------------- side panel ---------------- */
+  #panel {
+    position: fixed; top: 0; right: 0; z-index: 7;
+    width: min(420px, 92vw); height: 100%;
+    background: var(--panel-bg);
+    border-left: 1px solid var(--panel-border);
+    backdrop-filter: blur(16px) saturate(120%);
+    -webkit-backdrop-filter: blur(16px) saturate(120%);
+    transform: translateX(102%);
+    transition: transform .45s cubic-bezier(.22,.61,.36,1);
+    display: flex; flex-direction: column;
+  }
+  #panel.open { transform: translateX(0); }
+  #panel .head { padding: 26px 26px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  #panel .chip {
+    display: inline-block; font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 999px; margin-bottom: 12px;
+    border: 1px solid currentColor; color: var(--accent);
+  }
+  #panel h2 { margin: 0; font-size: 21px; font-weight: 500; line-height: 1.25; }
+  #panel .meta { margin-top: 10px; font-size: 11.5px; color: var(--muted); letter-spacing: .05em; }
+  #panel .body {
+    padding: 20px 26px 26px; overflow-y: auto; flex: 1;
+    font-size: 14px; line-height: 1.72; color: #cfe0ee; white-space: pre-wrap;
+  }
+  #panel .body::-webkit-scrollbar { width: 8px; }
+  #panel .body::-webkit-scrollbar-thumb { background: rgba(111,216,255,.18); border-radius: 8px; }
+  #panel .related { padding: 0 26px 26px; }
+  #panel .related h3 {
+    margin: 0 0 10px; font-size: 10.5px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500;
+  }
+  #panel .related .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  #panel .related button {
+    background: rgba(111,216,255,.07); border: 1px solid rgba(111,216,255,.22);
+    color: #dff2ff; border-radius: 999px; padding: 6px 12px;
+    font-size: 12px; cursor: pointer; transition: background .2s, transform .2s;
+    font-family: inherit;
+  }
+  #panel .related button:hover { background: rgba(111,216,255,.18); transform: translateY(-1px); }
+  #panel .close {
+    position: absolute; top: 18px; right: 18px; width: 30px; height: 30px;
+    border-radius: 50%; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.04); color: var(--muted);
+    font-size: 16px; line-height: 1; cursor: pointer;
+  }
+  #panel .close:hover { color: #fff; border-color: rgba(255,255,255,.4); }
+
+  /* ---------------- misc ---------------- */
+  #tip .tip-title { font-weight: 600; }
+  #tip .tip-group { opacity: .6; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+  #boot {
+    position: fixed; inset: 0; z-index: 20; display: flex; align-items: center;
+    justify-content: center; background: #000; color: var(--muted);
+    font-size: 13px; letter-spacing: .18em; text-transform: uppercase;
+    transition: opacity .8s ease; text-align: center; padding: 24px;
+  }
+  #boot.hidden { opacity: 0; pointer-events: none; }
+  #boot .err { max-width: 520px; line-height: 1.7; text-transform: none; letter-spacing: .02em; color: #ffb4b4; }
+  @media (max-width: 640px) {
+    #hud .mark { font-size: 18px; }
+    #legend { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div id="graph"></div>
+
+  <header id="hud">
+    <div class="mark">Jarvis</div>
+    <div class="sub"><b id="stat-notes">0</b> notes · <b id="stat-links">0</b> threads indexed</div>
+  </header>
+
+  <div id="legend"></div>
+
+  <aside id="panel" aria-hidden="true">
+    <button class="close" id="panel-close" title="Close">×</button>
+    <div class="head">
+      <span class="chip" id="panel-group">notes</span>
+      <h2 id="panel-title">Note</h2>
+      <div class="meta" id="panel-meta"></div>
+    </div>
+    <div class="body" id="panel-body"></div>
+    <div class="related" id="panel-related">
+      <h3>Linked notes</h3>
+      <div class="chips" id="panel-chips"></div>
+    </div>
+  </aside>
+
+  <div id="boot"><span id="boot-msg">spinning up the galaxy…</span></div>
+
+  <!-- three + 3d-force-graph straight from a CDN. No npm, no build step. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://esm.sh/three@0.180.0",
+      "three/": "https://esm.sh/three@0.180.0/"
+    }
+  }
+  </script>
+  <script src="graph-data.js"></script>
+  <script>
+    /* If the ESM CDN is unreachable, fall back to the UMD build (no custom
+       three.js objects, but the galaxy still renders). */
+    window.addEventListener('error', function (e) {
+      if (e && e.target && e.target.tagName === 'SCRIPT' && !window.__jarvisBooted) {
+        umdFallback();
+      }
+    }, true);
+    setTimeout(function () {
+      if (!window.__jarvisBooted) umdFallback();
+    }, 12000);
+
+    function umdFallback() {
+      if (window.__jarvisFallbackTried) return;
+      window.__jarvisFallbackTried = true;
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/3d-force-graph.min.js';
+      s.onload = function () {
+        if (window.ForceGraph3D) boot(window.ForceGraph3D, null);
+      };
+      s.onerror = function () {
+        var b = document.getElementById('boot-msg');
+        if (b) b.className = 'err',
+          b.textContent = 'Could not load 3d-force-graph from the CDN. Check your network connection (esm.sh / cdn.jsdelivr.net must be reachable) and reload.';
+      };
+      document.head.appendChild(s);
+    }
+  </script>
+  <script type="module">
+    /* ------------------------------------------------------------------
+       JARVIS — the galaxy
+       ------------------------------------------------------------------ */
+    import * as THREE from 'three';
+    import ForceGraph3D from 'https://esm.sh/3d-force-graph@1.80.0?external=three';
+
+    const PALETTE = [
+      '#6fd8ff', '#ff9f6b', '#a98bff', '#4fe3a7',
+      '#ffd166', '#ff77a9', '#7ee8fa', '#c6f76e'
+    ];
+    const BASE_LINK = 'rgba(120,165,215,0.22)';
+    const DIM_LINK  = 'rgba(120,165,215,0.05)';
+    const HOT_LINK  = 'rgba(125,225,255,0.85)';
+
+    const mount  = document.getElementById('graph');
+    const panel  = document.getElementById('panel');
+    const legend = document.getElementById('legend');
+
+    const nodes   = (window.GRAPH && GRAPH.nodes) ? GRAPH.nodes : [];
+    const links   = (window.GRAPH && GRAPH.links) ? GRAPH.links : [];
+    const byId    = new Map(nodes.map(n => [n.id, n]));
+    const adj     = new Map(nodes.map(n => [n.id, new Set()]));
+    for (const l of links) {
+      const a = idOf(l.source), b = idOf(l.target);
+      if (adj.has(a)) adj.get(a).add(b);
+      if (adj.has(b)) adj.get(b).add(a);
+    }
+
+    let graph = null;
+    let focusSet = null;          // null = nothing focused
+    let driftUntil = 0;           // timestamp: idle drift resumes after this
+    let driftAngle = 0;
+    let stars = null;
+    let pulses = [];              // [{node, until}]
+
+    function idOf(x) { return (x && typeof x === 'object') ? x.id : x; }
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+    function colorFor(group) {
+      let h = 0;
+      const s = String(group || 'notes');
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      return PALETTE[h % PALETTE.length];
+    }
+    function pauseDrift(ms) { driftUntil = performance.now() + ms; }
+
+    window.__galaxy = { focusNode, clearFocus, flyTo, nodes, byId, get graph() { return graph; } };
+
+    /* ---------------------------------------------------------------- boot */
+    function boot(ForceGraph3D, THREE) {
+      if (window.__jarvisBooted) return;
+      window.__jarvisBooted = true;
+
+      document.getElementById('stat-notes').textContent = nodes.length;
+      document.getElementById('stat-links').textContent = links.length;
+
+      graph = ForceGraph3D()(mount)
+        .backgroundColor('rgba(0,0,0,0)')
+        .showNavInfo(false)
+        .enableNodeDrag(false)
+        .nodeRelSize(4)
+        .nodeVal(n => 1 + Math.min(6, (n.degree || 0) * 0.7))
+        .nodeColor(n => colorFor(n.group))
+        .nodeOpacity(0.95)
+        .nodeLabel(n => `<div id="tip"><div class="tip-title">${esc(n.label)}</div>` +
+                        `<div class="tip-group">${esc(n.group)}</div></div>`)
+        .linkWidth(0.5)
+        .linkOpacity(0.28)
+        .linkColor(() => linkColorFn())
+        .onNodeClick(n => focusNode(n.id, { fly: true }))
+        .onBackgroundClick(() => { clearFocus(); closePanel(); });
+
+      if (THREE) {
+        graph.nodeThreeObject(n => nodeObject(n, THREE))
+             .nodeThreeObjectExtend(false);
+        addLights(THREE);
+        stars = addStarfield(THREE);
+      }
+
+      // legend
+      const groups = [...new Set(nodes.map(n => n.group))].sort();
+      legend.innerHTML = groups.map(g =>
+        `<div class="row"><span class="dot" style="color:${colorFor(g)}"></span>${esc(g)}</div>`
+      ).join('');
+
+      // controls: stop drifting while the user is dragging the camera
+      const controls = graph.controls();
+      if (controls && controls.addEventListener) {
+        controls.addEventListener('start', () => pauseDrift(1e9));
+        controls.addEventListener('end', () => pauseDrift(6000));
+      }
+      graph.cameraPosition({ x: 0, y: 0, z: initialDistance() });
+
+      // fit once the layout settles, then start the idle drift
+      let fitted = false;
+      graph.onEngineStop(() => {
+        if (!fitted) {
+          fitted = true;
+          if (nodes.length > 1) graph.zoomToFit(1400, 90);
+          pauseDrift(600);
+        }
+      });
+      setTimeout(() => {
+        if (!fitted) { fitted = true; if (nodes.length > 1) graph.zoomToFit(1400, 90); }
+      }, 4000);
+
+      window.addEventListener('resize', resize);
+      resize();
+      requestAnimationFrame(loop);
+
+      const bootEl = document.getElementById('boot');
+      bootEl.classList.add('hidden');
+      setTimeout(() => bootEl.remove(), 1000);
+
+      document.getElementById('panel-close').addEventListener('click', () => {
+        closePanel(); clearFocus();
+      });
+      window.dispatchEvent(new CustomEvent('jarvis:ready'));
+    };
+
+    function initialDistance() {
+      if (nodes.length <= 1) return 150;
+      if (nodes.length <= 6) return 220;
+      return 420;
+    }
+    function resize() {
+      if (!graph) return;
+      graph.width(mount.clientWidth).height(mount.clientHeight);
+    }
+
+    /* ------------------------------------------------------------- visuals */
+    function addLights(THREE) {
+      const scene = graph.scene();
+      scene.add(new THREE.AmbientLight(0xffffff, 1.1));
+      const key = new THREE.DirectionalLight(0xbfe6ff, 1.3);
+      key.position.set(1, 1, 1);
+      const rim = new THREE.DirectionalLight(0xff9bd2, 0.5);
+      rim.position.set(-1, -0.6, -1);
+      scene.add(key, rim);
+    }
+
+    function radialTexture(THREE, inner, outer) {
+      const size = 128;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+      g.addColorStop(0, inner);
+      g.addColorStop(0.28, outer);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, size, size);
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    }
+
+    let GLOW_TEX = null;
+    function glowTexture(THREE) {
+      if (!GLOW_TEX) GLOW_TEX = radialTexture(THREE, 'rgba(255,255,255,0.95)', 'rgba(255,255,255,0.30)');
+      return GLOW_TEX;
+    }
+
+    function nodeObject(node, THREE) {
+      const color = new THREE.Color(colorFor(node.group));
+      const r = 3.0 + Math.min(4.0, 0.95 * Math.sqrt(node.degree || 0) + 0.7);
+      const g = new THREE.Group();
+
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 24, 24),
+        new THREE.MeshStandardMaterial({
+          color, emissive: color, emissiveIntensity: 0.75,
+          roughness: 0.3, metalness: 0.2, transparent: true, opacity: 0.98
+        })
+      );
+      const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(r * 2.0, 16, 16),
+        new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.10,
+          blending: THREE.AdditiveBlending, depthWrite: false
+        })
+      );
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowTexture(THREE), color, transparent: true, opacity: 0.55,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      }));
+      glow.scale.setScalar(r * 7);
+
+      g.add(core, halo, glow);
+      node.__three = { core, halo, glow, r };
+      return g;
+    }
+
+    function addStarfield(THREE, count = 2400, radius = 2600) {
+      const pos = new Float32Array(count * 3);
+      const col = new Float32Array(count * 3);
+      const tint = new THREE.Color();
+      for (let i = 0; i < count; i++) {
+        const r = radius * (0.5 + Math.random() * 0.5);
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        pos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+        pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        pos[i * 3 + 2] = r * Math.cos(phi);
+        tint.setHSL(0.55 + Math.random() * 0.12, 0.35 + Math.random() * 0.4, 0.6 + Math.random() * 0.35);
+        col[i * 3] = tint.r; col[i * 3 + 1] = tint.g; col[i * 3 + 2] = tint.b;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const mat = new THREE.PointsMaterial({
+        size: 9, sizeAttenuation: true, vertexColors: true,
+        transparent: true, opacity: 0.9, depthWrite: false,
+        map: radialTexture(THREE, 'rgba(255,255,255,1)', 'rgba(255,255,255,0.45)'),
+        blending: THREE.AdditiveBlending
+      });
+      const points = new THREE.Points(geo, mat);
+      graph.scene().add(points);
+      return points;
+    }
+
+    /* --------------------------------------------------------------- focus */
+    function linkColorFn() {
+      return (l) => {
+        if (!focusSet) return BASE_LINK;
+        const a = idOf(l.source), b = idOf(l.target);
+        return (focusSet.has(a) && focusSet.has(b)) ? HOT_LINK : DIM_LINK;
+      };
+    }
+
+    function paint() {
+      for (const n of nodes) {
+        const t = n.__three;
+        if (!t) continue;
+        const on   = !focusSet || focusSet.has(n.id);
+        const live = focusSet && focusSet.has(n.id);
+        t.core.material.opacity = on ? 1 : 0.14;
+        t.core.material.emissiveIntensity = live ? 1.5 : 0.75;
+        t.halo.material.opacity = live ? 0.30 : (on ? 0.10 : 0.02);
+        t.glow.material.opacity = live ? 0.95 : (on ? 0.55 : 0.05);
+      }
+      if (graph) graph.linkColor(linkColorFn());
+    }
+
+    /** Highlight a node and its direct neighbours. */
+    function setFocus(ids) {
+      focusSet = ids && ids.length ? new Set(ids) : null;
+      paint();
+    }
+
+    function clearFocus() { setFocus(null); }
+
+    /** Focus + fly + panel. */
+    function focusNode(id, opts = {}) {
+      const node = byId.get(id);
+      if (!node) return;
+      const neighbours = [...(adj.get(id) || [])];
+      setFocus([id, ...neighbours]);
+      openPanel(node);
+      if (opts.fly !== false) flyTo(node, opts.distance || 110);
+      window.dispatchEvent(new CustomEvent('jarvis:focus', { detail: { id } }));
+    }
+
+    function flyTo(node, distance = 110) {
+      if (!graph) return;
+      const x = node.x || 0, y = node.y || 0, z = node.z || 0;
+      const d = Math.hypot(x, y, z);
+      let pos;
+      if (d < 1) {
+        pos = { x: 0, y: 0, z: distance };
+      } else {
+        const ratio = 1 + distance / d;
+        pos = { x: x * ratio, y: y * ratio, z: z * ratio };
+      }
+      graph.cameraPosition(pos, { x, y, z }, 2200);
+      pauseDrift(45000);
+    }
+
+    /* --------------------------------------------------------------- panel */
+    function openPanel(node) {
+      document.getElementById('panel-group').textContent = node.group || 'notes';
+      document.getElementById('panel-group').style.color = colorFor(node.group);
+      document.getElementById('panel-title').textContent = node.label;
+      document.getElementById('panel-meta').textContent =
+        `${node.words || 0} words · ${node.path || ''}`;
+      document.getElementById('panel-body').textContent = node.excerpt || '(empty note)';
+
+      const chips = document.getElementById('panel-chips');
+      const neighbours = [...(adj.get(node.id) || [])];
+      chips.innerHTML = '';
+      if (!neighbours.length) {
+        const span = document.createElement('span');
+        span.style.cssText = 'font-size:12px;color:var(--muted)';
+        span.textContent = 'No links yet — this one is an island.';
+        chips.appendChild(span);
+      } else {
+        for (const nid of neighbours) {
+          const other = byId.get(nid);
+          if (!other) continue;
+          const b = document.createElement('button');
+          b.textContent = other.label;
+          b.style.borderColor = colorFor(other.group);
+          b.addEventListener('click', () => focusNode(nid));
+          chips.appendChild(b);
+        }
+      }
+      panel.classList.add('open');
+      panel.setAttribute('aria-hidden', 'false');
+    }
+
+    function closePanel() {
+      panel.classList.remove('open');
+      panel.setAttribute('aria-hidden', 'true');
+    }
+
+    /* ---------------------------------------------------------- animation */
+    let lastT = performance.now();
+    function loop() {
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - lastT) / 1000);
+      lastT = now;
+
+      if (stars) stars.rotation.y += dt * 0.004;
+
+      if (graph && now > driftUntil) {
+        const cam = graph.cameraPosition();
+        const dist = Math.hypot(cam.x, cam.z) || 300;
+        driftAngle += dt * 0.045;
+        graph.cameraPosition({
+          x: Math.sin(driftAngle) * dist,
+          y: cam.y,
+          z: Math.cos(driftAngle) * dist
+        });
+      }
+
+      pulses = pulses.filter(p => now < p.until);
+      for (const p of pulses) {
+        const t = p.node.__three;
+        if (!t) continue;
+        const k = Math.sin((1 - (p.until - now) / p.duration) * Math.PI);
+        t.glow.scale.setScalar(t.r * (7 + 6 * k));
+        t.glow.material.opacity = 0.55 + 0.45 * k;
+      }
+      requestAnimationFrame(loop);
+    }
+
+    /** Give a node a brief "just born" glow pulse (Stage 6). */
+    window.pulseNode = function (id, ms = 2600) {
+      const node = byId.get(id);
+      if (!node) return;
+      pulses.push({ node, until: performance.now() + ms, duration: ms });
+    };
+
+    /* ---------------------------------------------------------------- go */
+    window.boot = boot;                 // used by the UMD fallback
+    boot(ForceGraph3D, THREE);
+  </script>
+</body>
+</html>
