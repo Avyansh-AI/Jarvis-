@@ -96,6 +96,20 @@ def make_excerpt(text: str, limit: int = EXCERPT_CHARS) -> str:
     return cut.rstrip(",;:. ") + "…"
 
 
+H1_RE = re.compile(r"^\s{0,3}#\s+(.+?)\s*$", re.M)
+TITLE_MD_RE = re.compile(r"[*_`]+")
+
+
+def title_from_h1(raw: str) -> str:
+    """Prefer the note's own '# Title' over its filename, if it has one."""
+    m = H1_RE.search(raw or "")
+    if not m:
+        return ""
+    title = WIKILINK_RE.sub(r"\1", LINK_RE.sub(r"\1", m.group(1)))
+    title = TITLE_MD_RE.sub("", title).strip(" \t#-")
+    return re.sub(r"\s+", " ", title)
+
+
 def title_from_filename(path: str) -> str:
     stem = os.path.splitext(os.path.basename(path))[0]
     stem = stem.replace("_", " ").replace("-", " ")
@@ -136,8 +150,9 @@ def read_note(path: str, notes_dir: str) -> dict:
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
         raw = fh.read()
     body = clean_markdown(raw)
-    title = title_from_filename(path)
-    # drop a leading H1 that just repeats the filename
+    # the note's own H1 wins; otherwise fall back to a tidy filename
+    title = title_from_h1(raw) or title_from_filename(path)
+    # drop a leading H1 that just repeats the title
     first, _, rest = body.partition("\n")
     if normalise(first) == normalise(title) and len(first) < 120:
         body = rest.lstrip("\n").strip() or body

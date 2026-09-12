@@ -28,6 +28,7 @@ import urllib.error
 import urllib.request
 import uuid
 from collections import OrderedDict
+from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -158,9 +159,9 @@ def graph_from_js() -> dict:
         return {"nodes": [], "links": []}
 
 
-def load_graph(force: bool = False) -> dict:
+def load_graph(force: bool = False, cfg: dict = None) -> dict:
     """Build (or rebuild) the in-memory index of notes."""
-    cfg = load_config()
+    cfg = cfg or load_config()
     root = notes_dir(cfg)
     stamp = newest_mtime(root) if os.path.isdir(root) else 0.0
 
@@ -309,6 +310,113 @@ def answer_question(system: str, messages: list, cfg: dict) -> tuple:
 
 
 # ---------------------------------------------------------------------------
+# total recall - grow the brain by voice
+# ---------------------------------------------------------------------------
+CAPTURE_DIRNAME = "captures"
+REMEMBER_RE = re.compile(r"^\s*remember(?:\s+(?:that|to))?\s*[:\-]?\s*", re.I)
+SMALL_WORDS = {"a", "an", "the", "to", "of", "in", "on", "for", "and", "or",
+               "with", "is", "at", "by", "from", "that", "this"}
+
+CONFIRMATIONS = [
+    "Filed, sir. \"{t}\" now exists in writing, which is more than most of my Tuesdays manage.",
+    "Remembered. \"{t}\" is in captures — I have taken the liberty of assuming you meant it.",
+    "Jotted down, sir. \"{t}\" joins the collection, such as it is.",
+    "Safely stored. Should you forget \"{t}\", the galaxy will remember on your behalf.",
+    "Noted and filed under captures. Do try to surprise me next time, sir.",
+    "Written down, sir. \"{t}\" is a note now, and therefore no longer merely a thought.",
+    "Captured. I have given it a home in captures — the rent is reasonable.",
+    "Logged, sir. \"{t}\" is now searchable, which is the closest I come to immortality.",
+    "In it goes. \"{t}\" is safe from the intervening years, sir.",
+]
+
+
+def witty_confirmation(title: str) -> str:
+    import random
+    return random.choice(CONFIRMATIONS).format(t=title)
+
+
+def strip_remember(text: str) -> str:
+    """'remember that the roaster needs a gasket' -> 'the roaster needs a gasket'"""
+    m = REMEMBER_RE.match(text or "")
+    return (text[m.end():] if m else (text or "")).strip()
+
+
+def title_from_text(body: str, max_words: int = 6) -> str:
+    words = re.findall(r"[A-Za-z0-9'’\-]+", body or "")[:max_words]
+    if not words:
+        return "Untitled Capture"
+    parts = [w.lower() for w in words]
+    titled = [parts[0][:1].upper() + parts[0][1:]]
+    for w in parts[1:]:
+        titled.append(w if w in SMALL_WORDS else w[:1].upper() + w[1:])
+    return " ".join(titled).strip(" ,;:.!?-") or "Untitled Capture"
+
+
+def slugify(title: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")
+    return (slug or "capture")[:60]
+
+
+def remember_note(text: str, cfg: dict) -> dict:
+    """Write a real markdown note into <notes>/captures/ and re-index."""
+    body = strip_remember(text)
+    if not body:
+        return {"ok": False, "error": "Remember what, sir?"}
+
+    root = notes_dir(cfg)
+    captures = os.path.join(root, CAPTURE_DIRNAME)
+    try:
+        os.makedirs(captures, exist_ok=True)
+    except OSError as exc:
+        return {"ok": False, "error": "I could not create the captures folder (%s)." % exc}
+
+    title = title_from_text(body)
+    base = slugify(title)
+    path = os.path.join(captures, base + ".md")
+    n = 2
+    while os.path.exists(path):
+        path = os.path.join(captures, "%s-%d.md" % (base, n))
+        n += 1
+
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("# %s\n\n%s\n\n_Captured by voice, %s._\n" % (title, body, stamp))
+    except OSError as exc:
+        return {"ok": False, "error": "I could not write that down (%s)." % exc}
+
+    graph = load_graph(force=True, cfg=cfg)
+    nodes = graph["nodes"]
+    rel_path = os.path.relpath(path, root).replace(os.sep, "/")
+    new = next((nd for nd in nodes if nd["path"] == rel_path), None)
+    if new is None:
+        return {"ok": False, "error": "Filed, but I could not re-index it."}
+
+    # where should it be born? next to the note it is most related to
+    related = None
+    if new.get("neighbors"):
+        related = new["neighbors"][0]
+    else:
+        ranked = [pair for pair in rank_notes(body, nodes) if pair[0] != new["id"]]
+        if ranked:
+            related = ranked[0][0]
+
+    return {
+        "ok": True,
+        "id": new["id"],
+        "node": new,
+        "title": title,
+        "path": rel_path,
+        "related": related,
+        "links": [l for l in graph["links"] if new["id"] in (l["source"], l["target"])],
+        # ids are positions in the freshly built array - the client re-syncs by path
+        "index": [{"id": nd["id"], "path": nd["path"]} for nd in nodes],
+        "said": witty_confirmation(title),
+        "notes": len(nodes),
+    }
+
+
+# ---------------------------------------------------------------------------
 # sessions - short per-session memory so follow-ups work
 # ---------------------------------------------------------------------------
 SESSIONS = OrderedDict()
@@ -363,8 +471,24 @@ class JarvisHandler(SimpleHTTPRequestHandler):
         route = self.path.split("?")[0].rstrip("/")
         if route == "/chat":
             self.handle_chat()
+        elif route == "/remember":
+            self.handle_remember()
         else:
             self.send_json(404, {"error": "Not found: %s" % route})
+
+    def handle_remember(self) -> None:
+        """'remember that ...' -> a real markdown note in <notes>/captures/."""
+        cfg = load_config()
+        payload = self.read_json()
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            self.send_json(400, {"ok": False, "error": "Nothing to remember, sir."})
+            return
+        try:
+            result = remember_note(text, cfg)
+        except Exception as exc:                       # never take the server down
+            result = {"ok": False, "error": "I could not file that, sir (%s)." % exc}
+        self.send_json(200, result)
 
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)

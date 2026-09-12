@@ -238,7 +238,7 @@
       <div id="answer-sources"></div>
     </div>
     <form id="ask" autocomplete="off">
-      <input id="q" type="text" placeholder="Ask Jarvis about your notes…" aria-label="Ask Jarvis" />
+      <input id="q" type="text" placeholder="Ask Jarvis about your notes — or: remember that…" aria-label="Ask Jarvis" />
       <button type="submit" id="send">Ask</button>
       <button type="button" class="icon" id="mic" title="Speak to Jarvis (Chrome/Edge)" hidden>🎙</button>
       <button type="button" class="icon" id="voice" title="Mute / unmute Jarvis">🔊</button>
@@ -347,6 +347,7 @@
       document.getElementById('stat-links').textContent = links.length;
 
       graph = ForceGraph3D()(mount)
+        .graphData({ nodes, links })
         .backgroundColor('rgba(0,0,0,0)')
         .showNavInfo(false)
         .enableNodeDrag(false)
@@ -369,11 +370,7 @@
         stars = addStarfield(THREE);
       }
 
-      // legend
-      const groups = [...new Set(nodes.map(n => n.group))].sort();
-      legend.innerHTML = groups.map(g =>
-        `<div class="row"><span class="dot" style="color:${colorFor(g)}"></span>${esc(g)}</div>`
-      ).join('');
+      renderLegend();
 
       // controls: stop drifting while the user is dragging the camera
       const controls = graph.controls();
@@ -594,6 +591,14 @@
       pauseDrift(45000);
     }
 
+    /* -------------------------------------------------------------- legend */
+    function renderLegend() {
+      const groups = [...new Set(nodes.map(n => n.group))].sort();
+      legend.innerHTML = groups.map(g =>
+        `<div class="row"><span class="dot" style="color:${colorFor(g)}"></span>${esc(g)}</div>`
+      ).join('');
+    }
+
     /* --------------------------------------------------------------- panel */
     function openPanel(node) {
       document.getElementById('panel-group').textContent = node.group || 'notes';
@@ -726,6 +731,7 @@
     window.ask = function ask(text) {
       text = String(text || '').trim();
       if (!text) return Promise.resolve(null);
+      if (rememberMatch(text)) return window.remember(text);   // Stage 6
       dockInput.value = '';
       window.setStatus('thinking…');
       const payload = { question: text, session: sessionId };
@@ -911,6 +917,117 @@
         try { rec.start(); } catch (e) { window.setStatus('mic busy — try again'); }
       });
     }
+
+    /* ------------------------------------------------------- total recall */
+    /* "remember that ..." writes a real markdown note and grows the galaxy. */
+    const REMEMBER_RE = /^\s*remember(?:\s+(?:that|to))?\s*[:\-]?\s*/i;
+
+    function rememberMatch(text) {
+      const m = REMEMBER_RE.exec(String(text || ''));
+      if (!m) return null;
+      const rest = String(text).slice(m[0].length).trim();
+      return rest.length ? rest : null;
+    }
+
+    /** Re-sync with the freshly built graph and splice the new note in live. */
+    function adoptNewNote(data) {
+      const idByPath = new Map((data.index || []).map(e => [e.path, e.id]));
+      const pathById = new Map(nodes.map(n => [n.id, n.path]));
+
+      // ids are positions in the rebuilt array, so existing notes can shift
+      for (const n of nodes) {
+        const nid = idByPath.get(n.path);
+        if (nid !== undefined) n.id = nid;
+      }
+      const remapped = links.map(l => {
+        const sp = pathById.get(idOf(l.source));
+        const tp = pathById.get(idOf(l.target));
+        return {
+          source: (sp !== undefined && idByPath.has(sp)) ? idByPath.get(sp) : idOf(l.source),
+          target: (tp !== undefined && idByPath.has(tp)) ? idByPath.get(tp) : idOf(l.target)
+        };
+      });
+      links.length = 0;
+      links.push(...remapped);
+
+      byId.clear(); adj.clear();
+      for (const n of nodes) { byId.set(n.id, n); adj.set(n.id, new Set()); }
+
+      // born next to the note it is most related to
+      const node = Object.assign({}, data.node);
+      const parent = (data.related !== null && data.related !== undefined)
+        ? byId.get(data.related) : null;
+      const jitter = () => (Math.random() - 0.5) * 18;
+      if (parent) {
+        node.x = (parent.x || 0) + jitter();
+        node.y = (parent.y || 0) + jitter();
+        node.z = (parent.z || 0) + jitter();
+      } else {
+        // nothing related: born in the middle of the galaxy, not off in the void
+        let sx = 0, sy = 0, sz = 0, c = 0;
+        for (const n of nodes) {
+          if (Number.isFinite(n.x)) { sx += n.x; sy += n.y; sz += n.z; c++; }
+        }
+        if (c) {
+          node.x = sx / c + jitter();
+          node.y = sy / c + jitter();
+          node.z = sz / c + jitter();
+        }
+      }
+      nodes.push(node);
+      byId.set(node.id, node);
+      adj.set(node.id, new Set());
+      for (const l of (data.links || [])) links.push({ source: l.source, target: l.target });
+
+      for (const l of links) {
+        const a = idOf(l.source), b = idOf(l.target);
+        if (adj.has(a)) adj.get(a).add(b);
+        if (adj.has(b)) adj.get(b).add(a);
+      }
+
+      graph.graphData({ nodes, links });
+      renderLegend();
+      document.getElementById('stat-notes').textContent = nodes.length;
+      document.getElementById('stat-links').textContent = links.length;
+
+      // the three.js object exists from the next frame - wait for it, then glow
+      let tries = 0;
+      (function born() {
+        const n = byId.get(node.id);
+        if ((n && n.__three) || tries++ > 24) {
+          window.pulseNode(node.id, 2800);
+          focusNode(node.id);
+        } else {
+          setTimeout(born, 50);
+        }
+      })();
+    }
+
+    window.remember = function remember(text) {
+      window.setStatus('remembering…');
+      return fetch('/remember', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      })
+        .then(r => r.json())
+        .then(data => {
+          window.setStatus('');
+          if (!data || !data.ok) {
+            window.showAnswer({ answer: (data && data.error) || 'I could not file that, sir.' });
+            return data;
+          }
+          adoptNewNote(data);
+          window.showAnswer({ answer: data.said, titles: [data.title], nodes: [data.id] });
+          window.speak(window.speakable(data.said));
+          return data;
+        })
+        .catch(() => {
+          window.showAnswer({ answer: 'That never reached the filing cabinet, sir.' });
+          window.setStatus('');
+          return null;
+        });
+    };
 
     /* speak every answer out loud - the note itself stays on screen */
     window.speakable = function speakable(text) {
