@@ -407,7 +407,22 @@
       document.getElementById('panel-close').addEventListener('click', () => {
         closePanel(); clearFocus();
       });
+
+      // boot greeting: shown immediately, spoken as soon as audio is unlocked
+      const greeting = window.greetingText();
+      pendingGreeting = greeting;
+      window.showAnswer({ answer: greeting });
+
       window.dispatchEvent(new CustomEvent('jarvis:ready'));
+    };
+
+    /** "Good evening, sir. 12 notes indexed, all present and accounted for." */
+    window.greetingText = function greetingText() {
+      const n = nodes.length;
+      const hour = new Date().getHours();
+      const part = hour < 12 ? 'morning' : (hour < 18 ? 'afternoon' : 'evening');
+      return 'Good ' + part + ', sir. ' + n + ' note' + (n === 1 ? '' : 's') +
+             ' indexed, all present and accounted for.';
     };
 
     function initialDistance() {
@@ -791,6 +806,12 @@
       } catch (e) { /* some browsers throw before the first real gesture */ }
       pickVoice();
       if (!voiceReadyHintShown) hideVoiceHint();
+      // the boot greeting waits for this moment - browsers block audio until now
+      if (pendingGreeting) {
+        const greeting = pendingGreeting;
+        pendingGreeting = null;
+        setTimeout(() => window.speak(greeting), 150);
+      }
     };
     ['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
       window.addEventListener(evt, window.unlockAudio, { capture: true }));

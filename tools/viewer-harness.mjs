@@ -176,6 +176,17 @@ check('boot ran, galaxy mounted', byId('stat-notes').textContent === 6,
       'notes=' + byId('stat-notes').textContent);
 check('custom node objects built', calls.nodeThreeObject > 0);
 
+// --- 0. boot greeting
+const GREET = /^Good (morning|afternoon|evening), sir\. 6 notes indexed, all present and accounted for\.$/;
+const greetText = byId('answer-text').textContent;
+check('boot greeting shown with real note count', GREET.test(greetText), JSON.stringify(greetText));
+globalThis.__spoken = [];
+handlers.pointerdown.forEach(fn => fn({}));            // first user gesture
+await new Promise(r => setTimeout(r, 220));
+check('boot greeting spoken after first click',
+      globalThis.__spoken.length === 1 && GREET.test(globalThis.__spoken[0]),
+      JSON.stringify(globalThis.__spoken[0] || '').slice(0, 70));
+
 // --- 1. click a node -> flies + opens panel
 calls.cameraPosition.length = 0;
 api.focusNode(0);
@@ -185,6 +196,7 @@ check('click node -> panel opens', byId('panel').classList.contains('open'));
 
 // --- 2. answer from 1 note -> fly to it, open panel, speak it
 calls.cameraPosition.length = 0; calls.zoomToFit.length = 0;
+globalThis.__spoken = [];
 globalThis.__spoken = [];
 await api.ask('where should captured notes live?');
 await new Promise(r => setTimeout(r, 150));   // speech fires on a 60ms timer
@@ -199,11 +211,12 @@ check('source chip rendered clickable', byId('answer-sources').children.length =
 // --- 3. small talk -> camera must NOT move
 const camBefore = JSON.stringify(cam);
 calls.cameraPosition.length = 0; calls.zoomToFit.length = 0;
+globalThis.__spoken = [];
 await api.ask('how are you today?');
 check('small talk -> no camera move',
       calls.cameraPosition.length === 0 && calls.zoomToFit.length === 0 && JSON.stringify(cam) === camBefore);
 await new Promise(r => setTimeout(r, 120));
-check('small talk -> still answered aloud', globalThis.__spoken.length === 2);
+check('small talk -> still answered aloud', globalThis.__spoken.length === 1);
 
 // --- 4. four or more sources -> cluster, not a dive
 calls.cameraPosition.length = 0; calls.zoomToFit.length = 0;
