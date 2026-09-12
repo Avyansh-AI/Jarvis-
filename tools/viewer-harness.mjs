@@ -37,12 +37,19 @@ class El {
   get innerHTML() { return this._html; }
   addEventListener(t, fn) { (this._h ||= {})[t] = fn; }
   appendChild(c) { this.children.push(c); return c; }
+  append(...c) { c.forEach(x => this.children.push(x)); }
   setAttribute() {} getAttribute() { return null; }
   remove() { this.removed = true; }
-  getContext() {
+  getContext(kind) {
+    if (String(kind).startsWith('webgl')) {           // WebGL probe in boot()
+      return { getExtension: () => null, getParameter: () => 'stub-gpu' };
+    }
     return {
       createRadialGradient: () => ({ addColorStop() {} }),
-      fillRect() {}, set fillStyle(v) {}, get fillStyle() { return ''; },
+      measureText: (t) => ({ width: String(t).length * 20 }),
+      fillText() {}, clearRect() {}, fillRect() {},
+      set fillStyle(v) {}, get fillStyle() { return ''; },
+      font: '', textAlign: '', textBaseline: '', shadowColor: '', shadowBlur: 0,
     };
   }
 }
@@ -86,7 +93,7 @@ const THREE = {
   Color: class { constructor() { this.r = 1; this.g = 1; this.b = 1; } setHSL() { return this; } },
   Group: class { constructor() { this.children = []; } add(...c) { this.children.push(...c); } },
   Mesh: class { constructor(g, m) { this.geometry = g; this.material = m; } },
-  Sprite: class { constructor(m) { this.material = m; this.scale = { setScalar() {} }; } },
+  Sprite: class { constructor(m) { this.material = m; this.scale = { setScalar() {}, set() {} }; this.position = { set() {} }; } },
   SphereGeometry: class {}, BufferGeometry: class { setAttribute() {} },
   BufferAttribute: class {}, Points: class { constructor() { this.rotation = { y: 0 }; } },
   MeshStandardMaterial: class { constructor(o = {}) { Object.assign(this, o); } },
@@ -209,6 +216,9 @@ check('boot ran, galaxy mounted', byIdEl('stat-notes').textContent === 6,
       'notes=' + byIdEl('stat-notes').textContent);
 check('node objects built for every note',
       api.nodes.every(n => !!n.__three), api.nodes.filter(n => !n.__three).length + ' missing');
+check('every node carries a readable label sprite',
+      api.nodes.every(n => n.__three && n.__three.label),
+      api.nodes.length + ' nodes, ' + api.nodes.filter(n => n.__three && n.__three.label).length + ' labelled');
 
 /* ---- boot greeting (Stage 5) ------------------------------------------- */
 const GREET = /^Good (morning|afternoon|evening), sir\. 6 notes indexed, all present and accounted for\.$/;
@@ -304,6 +314,17 @@ check('remember -> HUD note count updated',
       'hud=' + byIdEl('stat-notes').textContent);
 check('remember -> links rewired to the new ids',
       graph._data.links.every(l => Number.isFinite(l.source) && Number.isFinite(l.target)));
+
+/* ---- the failure screen must actually explain itself --------------------- */
+win.showBootError('Test failure screen', 'something went wrong');
+const bootEl = byIdEl('boot');
+check('boot error renders title + diagnostics',
+      bootEl.children.length === 1 && !bootEl.classList.contains('hidden'));
+const diagText = (bootEl.children[0].children[2] || {}).textContent || '';
+check('diagnostics report note count, WebGL and speech support',
+      diagText.includes('notes indexed') && diagText.includes('webgl') &&
+      diagText.includes('speech synthesis'),
+      JSON.stringify(diagText.split('\n')[0] || '').slice(0, 40));
 
 console.log(results.join('\n'));
 const passed = results.filter(r => r.startsWith('PASS')).length;

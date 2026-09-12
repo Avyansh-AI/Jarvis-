@@ -201,7 +201,22 @@
     transition: opacity .8s ease; text-align: center; padding: 24px;
   }
   #boot.hidden { opacity: 0; pointer-events: none; }
-  #boot .err { max-width: 520px; line-height: 1.7; text-transform: none; letter-spacing: .02em; color: #ffb4b4; }
+  #boot .err {
+    max-width: 620px; line-height: 1.7; text-transform: none; letter-spacing: .02em;
+    color: #ffb4b4; font-size: 13px; text-align: left;
+    background: rgba(255,80,80,.07); border: 1px solid rgba(255,120,120,.3);
+    padding: 18px 20px; border-radius: 12px;
+  }
+  #boot .err h4 { margin: 0 0 10px; color: #ffd9d9; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; }
+  #boot .err pre {
+    margin: 12px 0 0; white-space: pre-wrap; word-break: break-word;
+    font-size: 11.5px; color: #9fb3c6; font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  #boot .err button {
+    margin-top: 16px; padding: 9px 16px; border-radius: 10px; cursor: pointer;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25);
+    color: #fff; font-size: 12px; font-family: inherit;
+  }
   @media (max-width: 640px) {
     #hud .mark { font-size: 18px; }
     #legend { display: none; }
@@ -214,6 +229,7 @@
   <header id="hud">
     <div class="mark">Jarvis</div>
     <div class="sub"><b id="stat-notes">0</b> notes · <b id="stat-links">0</b> threads indexed</div>
+    <div class="hint">Click a star to read it. Ask Jarvis anything at the bottom.</div>
   </header>
 
   <div id="legend"></div>
@@ -338,9 +354,79 @@
 
     window.__galaxy = { focusNode, clearFocus, flyTo, nodes, byId, get graph() { return graph; } };
 
+    /* ------------------------------------------------------------ failures */
+    /* If anything goes wrong the galaxy says so on screen instead of showing
+       a black void - including why, and what the browser is missing. */
+    function diagnostics() {
+      const lines = [];
+      lines.push('notes indexed      : ' + nodes.length);
+      lines.push('links              : ' + links.length);
+      let gl = null;
+      try {
+        const c = document.createElement('canvas');
+        gl = c.getContext('webgl2') || c.getContext('webgl');
+      } catch (e) { /* handled below */ }
+      lines.push('webgl              : ' + (gl ? 'available' : 'NOT AVAILABLE'));
+      if (gl && gl.getExtension) {
+        try {
+          const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+          if (dbg) lines.push('gpu                : ' + gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL));
+        } catch (e) { /* optional */ }
+      }
+      lines.push('speech synthesis   : ' + (typeof speechSynthesis !== 'undefined' ? 'yes' : 'no'));
+      lines.push('speech recognition : ' + (!!(window.SpeechRecognition || window.webkitSpeechRecognition) ? 'yes' : 'no'));
+      // diagnostics must never be the thing that throws
+      lines.push('page               : ' + (typeof location !== 'undefined' ? location.href : '?'));
+      lines.push('user agent         : ' + (typeof navigator !== 'undefined' ? navigator.userAgent : '?'));
+      return lines.join('\n');
+    }
+
+    window.showBootError = function (title, detail) {
+      const bootEl = document.getElementById('boot');
+      if (!bootEl) return;
+      bootEl.classList.remove('hidden');
+      const box = document.createElement('div');
+      box.className = 'err';
+      const h = document.createElement('h4');
+      h.textContent = title;
+      const body = document.createElement('div');
+      body.textContent = detail || '';
+      const pre = document.createElement('pre');
+      pre.textContent = diagnostics();
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Reload';
+      btn.addEventListener('click', () => location.reload());
+      box.append(h, body, pre, btn);
+      bootEl.innerHTML = '';
+      bootEl.appendChild(box);
+    };
+
+    window.addEventListener('error', (e) => {
+      if (!window.__jarvisBooted) {
+        window.showBootError('The galaxy failed to start',
+          (e && e.message ? e.message : 'Unknown error') +
+          (e && e.filename ? '  (' + String(e.filename).split('/').pop() + ':' + e.lineno + ')' : ''));
+      }
+    });
+
     /* ---------------------------------------------------------------- boot */
     function boot(ForceGraph3D, THREE) {
       if (window.__jarvisBooted) return;
+
+      // WebGL is the one hard requirement - say so plainly if it is missing
+      let gl = null;
+      try {
+        const probe = document.createElement('canvas');
+        gl = probe.getContext('webgl2') || probe.getContext('webgl');
+      } catch (e) { gl = null; }
+      if (!gl) {
+        window.showBootError('This browser cannot draw the galaxy',
+          'The galaxy needs WebGL, and this browser did not provide it. Try a recent ' +
+          'Chrome, Edge, Firefox or Safari, and check that hardware acceleration is ' +
+          'enabled in the browser settings.');
+        return;
+      }
       window.__jarvisBooted = true;
 
       document.getElementById('stat-notes').textContent = nodes.length;
@@ -423,8 +509,8 @@
     };
 
     function initialDistance() {
-      if (nodes.length <= 1) return 150;
-      if (nodes.length <= 6) return 220;
+      if (nodes.length <= 1) return 70;    // a lone star should still read as a star
+      if (nodes.length <= 6) return 170;
       return 420;
     }
     function resize() {
@@ -459,6 +545,37 @@
       return t;
     }
 
+    /* Node labels: drawn to a canvas, no extra library. Only when the graph is
+       small enough that they help instead of clutter. */
+    const SHOW_LABELS = nodes.length > 0 && nodes.length <= 60;
+
+    function makeLabelSprite(THREE, text, cssColor) {
+      const font = '500 44px ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+      const canvas = document.createElement('canvas');
+      let ctx = canvas.getContext('2d');
+      ctx.font = font;
+      const w = Math.ceil((ctx.measureText ? ctx.measureText(text).width : text.length * 22)) + 28;
+      const h = 64;
+      canvas.width = w;
+      canvas.height = h;
+      ctx = canvas.getContext('2d');            // re-set: resizing clears state
+      ctx.font = font;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.95)';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = cssColor;
+      ctx.fillText(text, w / 2, h / 2 + 2);
+      const tex = new THREE.CanvasTexture(canvas);
+      if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthWrite: false, opacity: 0.85
+      }));
+      const k = 0.115;                          // world units per canvas pixel
+      sprite.scale.set(w * k, h * k, 1);
+      return sprite;
+    }
+
     let GLOW_TEX = null;
     function glowTexture(THREE) {
       if (!GLOW_TEX) GLOW_TEX = radialTexture(THREE, 'rgba(255,255,255,0.95)', 'rgba(255,255,255,0.30)');
@@ -491,7 +608,15 @@
       glow.scale.setScalar(r * 7);
 
       g.add(core, halo, glow);
-      node.__three = { core, halo, glow, r };
+
+      let label = null;
+      if (SHOW_LABELS) {
+        label = makeLabelSprite(THREE, node.label, '#dbe9f7');
+        label.position.set(0, r + 6.5, 0);
+        g.add(label);
+      }
+
+      node.__three = { core, halo, glow, label, r };
       return g;
     }
 
@@ -543,6 +668,7 @@
         t.core.material.emissiveIntensity = idle ? 0.75 : (primary ? 2.1 : (live ? 1.4 : 0.4));
         t.halo.material.opacity = idle ? 0.10 : (primary ? 0.40 : (live ? 0.26 : 0.02));
         t.glow.material.opacity = idle ? 0.55 : (primary ? 1.0 : (live ? 0.8 : 0.05));
+        if (t.label) t.label.material.opacity = idle ? 0.85 : (live ? 0.95 : 0.10);
         if (!t.pulsing) t.glow.scale.setScalar(t.r * (primary ? 10 : 7));
       }
       if (graph) graph.linkColor(linkColorFn());
@@ -1078,7 +1204,12 @@
 
     /* ---------------------------------------------------------------- go */
     window.boot = boot;                 // used by the UMD fallback
-    boot(ForceGraph3D, THREE);
+    try {
+      boot(ForceGraph3D, THREE);
+    } catch (err) {
+      window.showBootError('The galaxy failed to start', String((err && err.message) || err));
+      throw err;
+    }
   </script>
 </body>
 </html>
