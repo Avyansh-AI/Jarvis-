@@ -109,6 +109,71 @@
   }
   #panel .close:hover { color: #fff; border-color: rgba(255,255,255,.4); }
 
+  /* ---------------- dock (ask Jarvis) ---------------- */
+  #dock {
+    position: fixed; z-index: 8; left: 50%; bottom: 26px;
+    transform: translateX(-50%);
+    width: min(760px, calc(100vw - 48px));
+    transition: transform .45s cubic-bezier(.22,.61,.36,1);
+  }
+  body.panel-open #dock { transform: translateX(calc(-50% - 200px)); }
+  @media (max-width: 1180px) { body.panel-open #dock { transform: translateX(-50%); } }
+
+  #answer {
+    margin-bottom: 12px; padding: 16px 20px;
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
+    border-radius: 14px; backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 18px 60px rgba(0,0,0,.55);
+    opacity: 0; transform: translateY(10px); pointer-events: none;
+    transition: opacity .35s ease, transform .35s ease;
+    max-height: 34vh; overflow-y: auto;
+  }
+  #answer.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  #answer-text { font-size: 15px; line-height: 1.65; color: #e6f2fb; white-space: pre-wrap; }
+  #answer-sources {
+    margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  #answer-sources .src-label,
+  #answer-sources .src {
+    font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+  }
+  #answer-sources .src-label { color: var(--muted); }
+  #answer-sources .src {
+    padding: 4px 10px; border-radius: 999px;
+    border: 1px solid rgba(111,216,255,.28); background: rgba(111,216,255,.08);
+    color: #d8eeff; letter-spacing: .06em; text-transform: none; font-size: 11.5px;
+  }
+
+  #ask { display: flex; gap: 10px; align-items: center; }
+  #ask input {
+    flex: 1; min-width: 0;
+    background: rgba(8,12,18,.82); border: 1px solid rgba(111,216,255,.22);
+    color: var(--ink); border-radius: 12px; padding: 14px 18px;
+    font-size: 15px; font-family: inherit; outline: none;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    transition: border-color .25s, box-shadow .25s;
+  }
+  #ask input::placeholder { color: #5f7387; }
+  #ask input:focus { border-color: rgba(111,216,255,.6); box-shadow: 0 0 0 4px rgba(111,216,255,.08); }
+  #ask button {
+    border-radius: 12px; border: 1px solid rgba(111,216,255,.3);
+    background: rgba(111,216,255,.10); color: #dff2ff;
+    padding: 14px 20px; font-size: 14px; cursor: pointer; font-family: inherit;
+    letter-spacing: .06em; transition: background .2s, transform .15s, border-color .2s;
+    white-space: nowrap;
+  }
+  #ask button:hover { background: rgba(111,216,255,.2); }
+  #ask button:active { transform: translateY(1px); }
+  #ask button.icon { padding: 14px 16px; font-size: 16px; }
+  #ask button[disabled] { opacity: .45; cursor: default; }
+  #status {
+    height: 16px; margin-top: 8px; text-align: center;
+    font-size: 11.5px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent); opacity: 0; transition: opacity .25s;
+  }
+  #status.on { opacity: .85; }
+
   /* ---------------- misc ---------------- */
   #tip .tip-title { font-weight: 600; }
   #tip .tip-group { opacity: .6; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
@@ -149,6 +214,19 @@
       <div class="chips" id="panel-chips"></div>
     </div>
   </aside>
+
+  <div id="dock">
+    <div id="answer">
+      <div id="answer-text"></div>
+      <div id="answer-sources"></div>
+    </div>
+    <form id="ask" autocomplete="off">
+      <input id="q" type="text" placeholder="Ask Jarvis about your notes…" aria-label="Ask Jarvis" />
+      <button type="submit" id="send">Ask</button>
+      <button type="button" class="icon" id="mic" title="Speak (Chrome)" hidden>🎙</button>
+    </form>
+    <div id="status"></div>
+  </div>
 
   <div id="boot"><span id="boot-msg">spinning up the galaxy…</span></div>
 
@@ -500,11 +578,13 @@
       }
       panel.classList.add('open');
       panel.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('panel-open');
     }
 
     function closePanel() {
       panel.classList.remove('open');
       panel.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('panel-open');
     }
 
     /* ---------------------------------------------------------- animation */
@@ -544,6 +624,75 @@
       if (!node) return;
       pulses.push({ node, until: performance.now() + ms, duration: ms });
     };
+
+    /* ------------------------------------------------------------------ ask */
+    const dockForm  = document.getElementById('ask');
+    const dockInput = document.getElementById('q');
+    const answerBox = document.getElementById('answer');
+    const answerText = document.getElementById('answer-text');
+    const answerSrc  = document.getElementById('answer-sources');
+    const statusEl   = document.getElementById('status');
+
+    let sessionId = '';
+    try { sessionId = localStorage.getItem('jarvis.session') || ''; } catch (e) {}
+
+    window.setStatus = function (msg) {
+      statusEl.textContent = msg || '';
+      statusEl.classList.toggle('on', !!msg);
+    };
+
+    window.showAnswer = function (data) {
+      answerText.textContent = (data && data.answer) || '(silence)';
+      answerSrc.innerHTML = '';
+      const titles = (data && data.titles) || [];
+      if (titles.length) {
+        const label = document.createElement('span');
+        label.className = 'src-label';
+        label.textContent = 'from';
+        answerSrc.appendChild(label);
+        for (const t of titles) {
+          const chip = document.createElement('span');
+          chip.className = 'src';
+          chip.textContent = t;
+          answerSrc.appendChild(chip);
+        }
+      }
+      answerBox.classList.add('show');
+    };
+
+    window.ask = function ask(text) {
+      text = String(text || '').trim();
+      if (!text) return Promise.resolve(null);
+      dockInput.value = '';
+      window.setStatus('thinking…');
+      const payload = { question: text, session: sessionId };
+      return fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.session) {
+            sessionId = data.session;
+            try { localStorage.setItem('jarvis.session', sessionId); } catch (e) {}
+          }
+          window.showAnswer(data);
+          window.setStatus('');
+          window.dispatchEvent(new CustomEvent('jarvis:answer', { detail: data }));
+          return data;
+        })
+        .catch(() => {
+          window.showAnswer({ answer: 'Apologies, sir — I could not reach the brain. Is server.py still running?' });
+          window.setStatus('');
+          return null;
+        });
+    };
+
+    dockForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      window.ask(dockInput.value);
+    });
 
     /* ---------------------------------------------------------------- go */
     window.boot = boot;                 // used by the UMD fallback

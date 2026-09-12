@@ -56,7 +56,7 @@ STOPWORDS = {
     "when", "where", "which", "who", "whom", "how", "why", "are", "was", "were",
     "has", "have", "had", "its", "his", "her", "their", "our", "your", "you",
     "can", "could", "would", "should", "does", "did", "done", "get", "got",
-    "note", "notes", "jarvis", "please", "tell", "show", "give", "find", "list",
+    "jarvis", "please", "show", "give", "find", "list",
 }
 
 
@@ -109,8 +109,16 @@ def normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9 ]+", " ", text.lower()).strip()
 
 
+def stem(word: str) -> str:
+    """Very light stemmer, applied to BOTH questions and notes so it stays consistent."""
+    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
 def tokenise(text: str) -> list:
-    return [t for t in normalise(text).split() if len(t) > 2 and t not in STOPWORDS]
+    return [stem(t) for t in normalise(text).split()
+            if len(t) > 2 and t not in STOPWORDS]
 
 
 def find_notes(notes_dir: str) -> list:
