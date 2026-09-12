@@ -144,6 +144,14 @@
     border: 1px solid rgba(111,216,255,.28); background: rgba(111,216,255,.08);
     color: #d8eeff; letter-spacing: .06em; text-transform: none; font-size: 11.5px;
   }
+  #answer-sources .src-link {
+    cursor: pointer; font-family: inherit;
+    transition: background .2s, border-color .2s, transform .15s;
+  }
+  #answer-sources .src-link:hover {
+    background: rgba(111,216,255,.22); border-color: rgba(111,216,255,.65);
+    transform: translateY(-1px);
+  }
 
   #ask { display: flex; gap: 10px; align-items: center; }
   #ask input {
@@ -309,6 +317,8 @@
 
     let graph = null;
     let focusSet = null;          // null = nothing focused
+    let focusPrimary = null;      // the node the answer actually came from
+    const CLUSTER_MIN = 4;        // 4+ sources: light the cluster, don't dive in
     let driftUntil = 0;           // timestamp: idle drift resumes after this
     let driftAngle = 0;
     let stars = null;
@@ -511,22 +521,25 @@
     }
 
     function paint() {
+      const idle = !focusSet;
       for (const n of nodes) {
         const t = n.__three;
         if (!t) continue;
-        const on   = !focusSet || focusSet.has(n.id);
-        const live = focusSet && focusSet.has(n.id);
-        t.core.material.opacity = on ? 1 : 0.14;
-        t.core.material.emissiveIntensity = live ? 1.5 : 0.75;
-        t.halo.material.opacity = live ? 0.30 : (on ? 0.10 : 0.02);
-        t.glow.material.opacity = live ? 0.95 : (on ? 0.55 : 0.05);
+        const live    = idle || focusSet.has(n.id);
+        const primary = focusPrimary !== null && n.id === focusPrimary;
+        t.core.material.opacity = idle ? 1 : (live ? 1 : 0.14);
+        t.core.material.emissiveIntensity = idle ? 0.75 : (primary ? 2.1 : (live ? 1.4 : 0.4));
+        t.halo.material.opacity = idle ? 0.10 : (primary ? 0.40 : (live ? 0.26 : 0.02));
+        t.glow.material.opacity = idle ? 0.55 : (primary ? 1.0 : (live ? 0.8 : 0.05));
+        if (!t.pulsing) t.glow.scale.setScalar(t.r * (primary ? 10 : 7));
       }
       if (graph) graph.linkColor(linkColorFn());
     }
 
-    /** Highlight a node and its direct neighbours. */
-    function setFocus(ids) {
+    /** Highlight a set of nodes; `primary` (if given) burns brightest. */
+    function setFocus(ids, primary = null) {
       focusSet = ids && ids.length ? new Set(ids) : null;
+      focusPrimary = (primary === null || primary === undefined) ? null : primary;
       paint();
     }
 
@@ -537,7 +550,7 @@
       const node = byId.get(id);
       if (!node) return;
       const neighbours = [...(adj.get(id) || [])];
-      setFocus([id, ...neighbours]);
+      setFocus([id, ...neighbours], id);
       openPanel(node);
       if (opts.fly !== false) flyTo(node, opts.distance || 110);
       window.dispatchEvent(new CustomEvent('jarvis:focus', { detail: { id } }));
@@ -555,6 +568,14 @@
         pos = { x: x * ratio, y: y * ratio, z: z * ratio };
       }
       graph.cameraPosition(pos, { x, y, z }, 2200);
+      pauseDrift(45000);
+    }
+
+    /** Frame a whole cluster instead of flying to a single node. */
+    function frameSet(ids, padding = 130) {
+      if (!graph || !ids.length) return;
+      const set = new Set(ids);
+      graph.zoomToFit(1500, padding, (n) => set.has(n.id));
       pauseDrift(45000);
     }
 
@@ -617,14 +638,25 @@
         });
       }
 
-      pulses = pulses.filter(p => now < p.until);
+      const alive = [];
       for (const p of pulses) {
         const t = p.node.__three;
+        if (now >= p.until) {                       // pulse over - restore the node
+          if (t) {
+            t.pulsing = false;
+            t.glow.scale.setScalar(t.r * 7);
+            t.glow.material.opacity = 0.55;
+          }
+          continue;
+        }
+        alive.push(p);
         if (!t) continue;
+        t.pulsing = true;
         const k = Math.sin((1 - (p.until - now) / p.duration) * Math.PI);
         t.glow.scale.setScalar(t.r * (7 + 6 * k));
         t.glow.material.opacity = 0.55 + 0.45 * k;
       }
+      pulses = alive;
       requestAnimationFrame(loop);
     }
 
@@ -655,17 +687,23 @@
       answerText.textContent = (data && data.answer) || '(silence)';
       answerSrc.innerHTML = '';
       const titles = (data && data.titles) || [];
+      const ids = (data && data.nodes) || [];
       if (titles.length) {
         const label = document.createElement('span');
         label.className = 'src-label';
-        label.textContent = 'from';
+        label.textContent = ids.length >= CLUSTER_MIN ? 'drawn from' : 'from';
         answerSrc.appendChild(label);
-        for (const t of titles) {
-          const chip = document.createElement('span');
-          chip.className = 'src';
+        titles.forEach((t, i) => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'src src-link';
           chip.textContent = t;
+          chip.title = 'Fly to this note';
+          if (Number.isInteger(ids[i]) && byId.has(ids[i])) {
+            chip.addEventListener('click', () => focusNode(ids[i]));
+          }
           answerSrc.appendChild(chip);
-        }
+        });
       }
       answerBox.classList.add('show');
     };
@@ -853,10 +891,51 @@
       });
     }
 
-    /* speak every answer out loud */
+    /* speak every answer out loud - the note itself stays on screen */
+    window.speakable = function speakable(text) {
+      let s = String(text || '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`([^`]*)`/g, '$1')
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+        .replace(/[*_~>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (s.length > 700) {                     // never monologue
+        const cut = s.slice(0, 700);
+        const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+        s = stop > 200 ? cut.slice(0, stop + 1) : cut.trimEnd() + '.';
+      }
+      return s;
+    };
+
     window.addEventListener('jarvis:answer', (e) => {
       const data = e.detail || {};
-      if (data.answer) window.speak(data.answer);
+      if (data.answer) window.speak(window.speakable(data.answer));
+    });
+
+    /* ------------------------------------------------- fly to the source */
+    /* When Jarvis answers from a note, prove it: fly to the top source,
+       light it and its neighbours, and open its panel. If the answer drew on
+       four or more notes, light the whole cluster and frame it instead.
+       Small talk returns no nodes, so the camera stays exactly where it is. */
+    window.addEventListener('jarvis:answer', (e) => {
+      const data = e.detail || {};
+      const ids = (data.nodes || []).filter(i => Number.isInteger(i) && byId.has(i));
+      if (!ids.length) return;
+
+      if (ids.length >= CLUSTER_MIN) {
+        const cluster = new Set();
+        for (const id of ids) {
+          cluster.add(id);
+          for (const nb of (adj.get(id) || [])) cluster.add(nb);
+        }
+        setFocus([...cluster], ids[0]);
+        openPanel(byId.get(ids[0]));
+        frameSet([...cluster]);
+      } else {
+        focusNode(ids[0]);
+      }
     });
 
     /* ---------------------------------------------------------------- go */
