@@ -33,16 +33,31 @@ Then open **http://localhost:4700**.
 
 1. **Python 3.8+**. That is the only requirement — everything is in the
    standard library. There is nothing to `pip install`.
-2. **Add your API key.** Open `config.json` in the project root and replace the
-   placeholder with your Anthropic API key:
+2. **Add your API key.** Open `config.json` in the project root and paste in
+   either an **Anthropic** or an **OpenRouter** key. The provider is detected
+   from the key itself, so you normally only touch `api_key` and `model`:
 
    ```json
    {
-     "api_key": "sk-ant-your-key-here",
-     "model": "claude-opus-4-8",
-     "notes_dir": ""
+     "api_key": "sk-or-v1-your-openrouter-key",
+     "model": "anthropic/claude-3.5-sonnet",
+     "notes_dir": "",
+     "provider": "auto",
+     "base_url": ""
    }
    ```
+
+   | Key looks like | Provider used | Endpoint |
+   |---|---|---|
+   | `sk-or-…` | OpenRouter | `openrouter.ai/api/v1/chat/completions` |
+   | `sk-ant-…` | Anthropic | `api.anthropic.com/v1/messages` |
+   | `PUT-YOUR-KEY-HERE` | `claude -p` CLI | your machine |
+
+   You can force one with `"provider": "openrouter" | "anthropic" | "cli"`, and
+   point at a proxy with `"base_url"`. Model ids on OpenRouter look like
+   `anthropic/claude-3.5-sonnet` — pick one from
+   [openrouter.ai/models](https://openrouter.ai/models). If the model is wrong,
+   Jarvis tells you so and suggests live ids it can actually see.
 
    `config.json` is **git-ignored**, and it lives outside `viewer/`, so the
    browser can never reach it. It is created for you with placeholders the first
@@ -118,6 +133,8 @@ node tools/viewer-harness.mjs      # 26 checks
 | Black screen, "could not load 3d-force-graph" | The viewer pulls Three.js and `3d-force-graph` from `esm.sh`; check your connection or ad-blocker |
 | Answers, but no voice | Click once anywhere — browsers block audio before a gesture. Check the 🔇 toggle |
 | No 🎙 button | Your browser lacks `webkitSpeechRecognition`. Chrome and Edge have it; Safari and Firefox don't (speaking out still works) |
+| "OpenRouter rejected the key" | The key in `config.json` is wrong or revoked |
+| "OpenRouter does not recognise that model…" | Set `"model"` to a real OpenRouter id — the error lists live suggestions |
 | "No API key in config.json…" | Paste your key, or install the `claude` CLI |
 | An empty galaxy | Run `python3 build.py` — `viewer/graph-data.js` may be missing or stale |
 

@@ -55,7 +55,15 @@ DEFAULT_CONFIG = {
     "api_key": "PUT-YOUR-KEY-HERE",
     "model": "claude-opus-4-8",
     "notes_dir": "",
+    # "provider": "auto" picks anthropic / openrouter / cli from the key itself.
+    # Force one with "anthropic", "openrouter" or "cli".
+    "provider": "auto",
+    "base_url": "",          # optional override, e.g. a local proxy
 }
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+REFERER = "http://localhost:%d" % PORT
 
 BUTLER_PROMPT = """\
 You are JARVIS, the user's knowledge system, and you speak as a dry, impeccably \
@@ -121,6 +129,28 @@ def load_config() -> dict:
 def has_api_key(cfg: dict) -> bool:
     key = str(cfg.get("api_key") or "").strip()
     return bool(key) and not key.upper().startswith("PUT-YOUR")
+
+
+def resolve_provider(cfg: dict) -> str:
+    """Which backend should answer: 'anthropic', 'openrouter' or 'cli'."""
+    forced = str(cfg.get("provider") or "auto").strip().lower()
+    if forced in ("anthropic", "openrouter", "cli"):
+        return forced
+    if not has_api_key(cfg):
+        return "cli"
+    key = str(cfg.get("api_key") or "").strip()
+    model = str(cfg.get("model") or "")
+    if key.startswith("sk-or-") or "/" in model:
+        return "openrouter"
+    return "anthropic"
+
+
+def openrouter_model(cfg: dict) -> str:
+    """OpenRouter ids look like 'anthropic/claude-...'; add the vendor if missing."""
+    model = str(cfg.get("model") or DEFAULT_CONFIG["model"]).strip()
+    if "/" not in model and model.startswith("claude-"):
+        model = "anthropic/" + model
+    return model
 
 
 def notes_dir(cfg: dict) -> str:
@@ -266,6 +296,83 @@ def call_anthropic(system: str, messages: list, cfg: dict) -> str:
     return "".join(parts).strip()
 
 
+def suggest_models(wanted: str) -> str:
+    """On an unknown-model error, name a few real OpenRouter ids."""
+    try:
+        req = urllib.request.Request(OPENROUTER_MODELS_URL, headers={"User-Agent": "JARVIS"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        ids = [m.get("id", "") for m in data.get("data", [])]
+    except Exception:
+        return ""
+    term = (wanted or "").split("/")[-1][:12].lower()
+    close = [i for i in ids if term and term in i.lower()][:5]
+    if not close:
+        close = [i for i in ids if i.startswith("anthropic/")][:5]
+    return ", ".join(close)
+
+
+def openrouter_error(exc) -> str:
+    """Turn an OpenRouter HTTP error into something a human can act on."""
+    detail = ""
+    try:
+        detail = exc.read().decode("utf-8", "replace")
+    except Exception:
+        pass
+    message = detail
+    try:
+        payload = json.loads(detail or "{}")
+        message = (payload.get("error") or {}).get("message") or detail
+    except ValueError:
+        pass
+    code = getattr(exc, "code", 0)
+    if code in (401, 403):
+        return "OpenRouter rejected the key (%s). Check config.json." % (message or code)
+    if code == 402:
+        return "OpenRouter says the account is out of credits: %s" % (message or code)
+    if code == 404 or "model" in str(message).lower() and "not" in str(message).lower():
+        hint = suggest_models(str(message))
+        return ("OpenRouter does not recognise that model (%s). Pick an id from "
+                "https://openrouter.ai/models and set it as \"model\" in config.json.%s"
+                % (message or code, (" Closest matches: " + hint) if hint else ""))
+    return "OpenRouter error %s: %s" % (code, message or exc.reason)
+
+
+def call_openrouter(system: str, messages: list, cfg: dict) -> str:
+    """OpenRouter's OpenAI-compatible chat completions endpoint."""
+    base = str(cfg.get("base_url") or "").strip()
+    url = (base.rstrip("/") + "/chat/completions") if base else OPENROUTER_URL
+    payload = {
+        "model": openrouter_model(cfg),
+        "max_tokens": MAX_TOKENS,
+        "temperature": 0.7,
+        "messages": [{"role": "system", "content": system}] + list(messages),
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "content-type": "application/json",
+            "authorization": "Bearer %s" % str(cfg.get("api_key") or ""),
+            "HTTP-Referer": REFERER,        # optional, for openrouter.ai rankings
+            "X-Title": "JARVIS",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(openrouter_error(exc))
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("OpenRouter returned no choices: %s" % json.dumps(data)[:300])
+    content = ((choices[0].get("message") or {}).get("content") or "").strip()
+    if not content:
+        raise RuntimeError("OpenRouter returned an empty answer.")
+    return content
+
+
 def call_claude_cli(system: str, messages: list, cfg: dict) -> str:
     """Fallback for when there is no API key: shell out to `claude -p`."""
     convo = []
@@ -294,7 +401,10 @@ def call_claude_cli(system: str, messages: list, cfg: dict) -> str:
 
 def answer_question(system: str, messages: list, cfg: dict) -> tuple:
     """-> (answer_text, source_label)"""
-    if has_api_key(cfg):
+    provider = resolve_provider(cfg)
+    if provider == "openrouter":
+        return call_openrouter(system, messages, cfg), "openrouter"
+    if provider == "anthropic":
         try:
             return call_anthropic(system, messages, cfg), "anthropic"
         except urllib.error.HTTPError as exc:
@@ -597,18 +707,33 @@ def main() -> int:
         return 1
     cfg = ensure_config()
     graph = load_graph()
-    mode = "Anthropic API (%s)" % cfg.get("model") if has_api_key(cfg) else "`claude -p` CLI"
+    provider = resolve_provider(cfg)
+    if provider == "openrouter":
+        mode = "OpenRouter (%s)" % openrouter_model(cfg)
+    elif provider == "anthropic":
+        mode = "Anthropic API (%s)" % cfg.get("model")
+    else:
+        mode = "`claude -p` CLI"
 
     print("JARVIS online -> http://localhost:%d" % PORT)
     print("  serving : %s  (only this folder is reachable)" % VIEWER_DIR)
     print("  notes   : %s  (%d indexed)" % (notes_dir(cfg), len(graph.get("nodes", []))))
     print("  brain   : %s" % mode)
-    if not has_api_key(cfg):
-        print("            (paste your key into config.json to use the API instead)")
+    if provider == "cli":
+        print("            (paste an Anthropic or OpenRouter key into config.json to use the API)")
     print("Ctrl+C to stop.")
 
     ThreadingHTTPServer.allow_reuse_address = True
-    with ThreadingHTTPServer(("0.0.0.0", PORT), JarvisHandler) as httpd:
+    try:
+        httpd = ThreadingHTTPServer(("0.0.0.0", PORT), JarvisHandler)
+    except OSError as exc:
+        if getattr(exc, "errno", None) in (98, 48, 10048):   # address already in use
+            print("JARVIS: port %d is already in use." % PORT, file=sys.stderr)
+            print("        Something is already serving it (another server.py?), "
+                  "or try: JARVIS_PORT=%d python3 server.py" % (PORT + 1), file=sys.stderr)
+            return 1
+        raise
+    with httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
