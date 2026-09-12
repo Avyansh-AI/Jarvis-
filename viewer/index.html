@@ -167,6 +167,15 @@
   #ask button:active { transform: translateY(1px); }
   #ask button.icon { padding: 14px 16px; font-size: 16px; }
   #ask button[disabled] { opacity: .45; cursor: default; }
+  #ask button.icon.active {
+    background: rgba(255, 96, 96, .22); border-color: rgba(255, 130, 130, .65);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  #ask button.icon.muted { opacity: .4; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 110, 110, .45); }
+    50%      { box-shadow: 0 0 0 10px rgba(255, 110, 110, 0); }
+  }
   #status {
     height: 16px; margin-top: 8px; text-align: center;
     font-size: 11.5px; letter-spacing: .18em; text-transform: uppercase;
@@ -223,7 +232,8 @@
     <form id="ask" autocomplete="off">
       <input id="q" type="text" placeholder="Ask Jarvis about your notes…" aria-label="Ask Jarvis" />
       <button type="submit" id="send">Ask</button>
-      <button type="button" class="icon" id="mic" title="Speak (Chrome)" hidden>🎙</button>
+      <button type="button" class="icon" id="mic" title="Speak to Jarvis (Chrome/Edge)" hidden>🎙</button>
+      <button type="button" class="icon" id="voice" title="Mute / unmute Jarvis">🔊</button>
     </form>
     <div id="status"></div>
   </div>
@@ -692,6 +702,161 @@
     dockForm.addEventListener('submit', (e) => {
       e.preventDefault();
       window.ask(dockInput.value);
+    });
+
+    /* -------------------------------------------------------------- voice */
+    /* Everything here is free and built into the browser: speechSynthesis for
+       the mouth, webkitSpeechRecognition for the ear. */
+    const synth = (typeof speechSynthesis !== 'undefined') ? window.speechSynthesis : null;
+    const micBtn = document.getElementById('mic');
+    const voiceBtn = document.getElementById('voice');
+
+    let voice = null;          // chosen SpeechSynthesisVoice
+    let audioReady = false;    // has the user interacted yet?
+    let voiceOn = true;
+    try { voiceOn = localStorage.getItem('jarvis.voice') !== 'off'; } catch (e) {}
+
+    function pickVoice() {
+      if (!synth) return;
+      const voices = synth.getVoices() || [];
+      if (!voices.length) return;
+      const en = voices.filter(v => /^en/i.test(v.lang || ''));
+      voice =
+        // a British voice if the system has one, any English voice otherwise
+        en.find(v => /^en[-_]GB/i.test(v.lang || '')) ||
+        en.find(v => /gb/i.test(v.name || '')) ||
+        en.find(v => /^en[-]?US/i.test(v.lang || '')) ||
+        en[0] || voices[0] || null;
+      if (voice) console.log('JARVIS voice:', voice.name, voice.lang);
+    }
+    if (synth) {
+      pickVoice();
+      try {
+        synth.addEventListener('voiceschanged', pickVoice);
+      } catch (e) {
+        synth.onvoiceschanged = pickVoice;   // older Safari
+      }
+      setTimeout(pickVoice, 400);   // some browsers populate the list late
+    }
+
+    /** Browsers block audio until the user interacts - unlock on first gesture. */
+    window.unlockAudio = function unlockAudio() {
+      if (!synth || audioReady) return;
+      audioReady = true;
+      try {
+        synth.cancel();
+        const warm = new SpeechSynthesisUtterance(' ');
+        warm.volume = 0;
+        warm.lang = voice ? voice.lang : 'en-GB';
+        synth.speak(warm);
+        synth.resume();
+      } catch (e) { /* some browsers throw before the first real gesture */ }
+      pickVoice();
+      if (!voiceReadyHintShown) hideVoiceHint();
+    };
+    ['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
+      window.addEventListener(evt, window.unlockAudio, { capture: true }));
+
+    let voiceReadyHintShown = true;
+    function hideVoiceHint() {
+      voiceReadyHintShown = false;
+      if (statusEl.textContent === 'click anywhere to enable voice') {
+        window.setStatus('');
+      }
+    }
+    if (synth && !audioReady) {
+      window.setStatus('click anywhere to enable voice');
+      voiceReadyHintShown = true;
+    }
+
+    window.speak = function speak(text) {
+      if (!synth || !text) return;
+      if (!voiceOn) return;
+      if (!audioReady) window.unlockAudio();
+      synth.cancel();                       // never queue up a backlog
+      const u = new SpeechSynthesisUtterance(String(text));
+      if (voice) u.voice = voice;
+      u.lang = (voice && voice.lang) || 'en-GB';
+      u.rate = 0.97;
+      u.pitch = 0.92;
+      u.volume = 1;
+      // Chrome sometimes swallows speech spoken in the same tick as cancel()
+      setTimeout(() => { try { synth.speak(u); synth.resume(); } catch (e) {} }, 60);
+    };
+
+    window.stopSpeaking = function stopSpeaking() {
+      if (synth) { try { synth.cancel(); } catch (e) {} }
+    };
+
+    voiceBtn.addEventListener('click', () => {
+      voiceOn = !voiceOn;
+      try { localStorage.setItem('jarvis.voice', voiceOn ? 'on' : 'off'); } catch (e) {}
+      voiceBtn.textContent = voiceOn ? '🔊' : '🔇';
+      voiceBtn.classList.toggle('muted', !voiceOn);
+      voiceBtn.title = voiceOn ? 'Mute Jarvis' : 'Unmute Jarvis';
+      if (!voiceOn) window.stopSpeaking(); else window.speak('Voice restored, sir.');
+    });
+    voiceBtn.textContent = voiceOn ? '🔊' : '🔇';
+    voiceBtn.classList.toggle('muted', !voiceOn);
+
+    /* ------------------------------------------------------------- the ear */
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let rec = null;
+    let listening = false;
+
+    if (SpeechRec) {
+      micBtn.hidden = false;
+      rec = new SpeechRec();
+      rec.lang = 'en-GB';
+      rec.interimResults = false;
+      rec.continuous = false;
+      rec.maxAlternatives = 1;
+
+      rec.onstart = () => {
+        listening = true;
+        micBtn.classList.add('active');
+        window.stopSpeaking();
+        window.setStatus('listening…');
+      };
+      rec.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        transcript = transcript.trim();
+        if (transcript) window.ask(transcript);   // same /chat flow as typing
+      };
+      rec.onerror = (event) => {
+        listening = false;
+        micBtn.classList.remove('active');
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          window.setStatus('microphone blocked — allow it in the address bar');
+        } else if (event.error === 'no-speech') {
+          window.setStatus('didn’t catch that, sir');
+        } else if (event.error !== 'aborted') {
+          window.setStatus('mic error: ' + event.error);
+        } else {
+          window.setStatus('');
+        }
+      };
+      rec.onend = () => {
+        listening = false;
+        micBtn.classList.remove('active');
+        if (statusEl.textContent === 'listening…') window.setStatus('');
+      };
+
+      micBtn.addEventListener('click', () => {
+        window.unlockAudio();
+        if (listening) { try { rec.stop(); } catch (e) {} return; }
+        window.stopSpeaking();
+        try { rec.start(); } catch (e) { window.setStatus('mic busy — try again'); }
+      });
+    }
+
+    /* speak every answer out loud */
+    window.addEventListener('jarvis:answer', (e) => {
+      const data = e.detail || {};
+      if (data.answer) window.speak(data.answer);
     });
 
     /* ---------------------------------------------------------------- go */
