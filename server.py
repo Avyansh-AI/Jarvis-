@@ -52,18 +52,42 @@ REL_CUTOFF = 0.4       # keep notes scoring at least this fraction of the best h
 SESSION_CAP = 40
 
 DEFAULT_CONFIG = {
-    "api_key": "PUT-YOUR-KEY-HERE",
+    "api_key": "PUT-YOUR-KEY-HERE",   # Anthropic, or a single generic key
     "model": "claude-opus-4-8",
     "notes_dir": "",
-    # "provider": "auto" picks anthropic / openrouter / cli from the key itself.
-    # Force one with "anthropic", "openrouter" or "cli".
+    # "provider": "auto" picks one from whichever key is filled in.
+    # Force one with "anthropic", "openrouter", "groq" or "cli".
     "provider": "auto",
     "base_url": "",          # optional override, e.g. a local proxy
+    # or set both and switch between them in Settings:
+    "openrouter_key": "",
+    "groq_key": "",
 }
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 REFERER = "http://localhost:%d" % PORT
+
+# Every OpenAI-compatible backend we can talk to.
+PROVIDERS = {
+    "openrouter": {
+        "label": "OpenRouter",
+        "key_field": "openrouter_key",
+        "key_prefix": "sk-or-",
+        "chat_url": "https://openrouter.ai/api/v1/chat/completions",
+        "models_url": "https://openrouter.ai/api/v1/models",
+        "models_key": "data",
+        "models_help": "https://openrouter.ai/models",
+    },
+    "groq": {
+        "label": "Groq",
+        "key_field": "groq_key",
+        "key_prefix": "gsk_",
+        "chat_url": "https://api.groq.com/openai/v1/chat/completions",
+        "models_url": "https://api.groq.com/openai/v1/models",
+        "models_key": "data",
+        "models_help": "https://console.groq.com/docs/models",
+    },
+}
+LISTABLE = ("openrouter", "groq")
 
 BUTLER_PROMPT = """\
 You are JARVIS, the user's knowledge system, and you speak as a dry, impeccably \
@@ -126,31 +150,71 @@ def load_config() -> dict:
     return cfg
 
 
-def has_api_key(cfg: dict) -> bool:
-    key = str(cfg.get("api_key") or "").strip()
+def _clean(value) -> str:
+    return str(value or "").strip()
+
+
+def has_api_key(cfg: dict, provider: str = None) -> bool:
+    """Is there a usable key for this provider (or any provider)?"""
+    if provider and provider in PROVIDERS:
+        key = _clean(cfg.get(PROVIDERS[provider]["key_field"]))
+        return bool(key)
+    if any(_clean(cfg.get(p["key_field"])) for p in PROVIDERS.values()):
+        return True
+    key = _clean(cfg.get("api_key"))
     return bool(key) and not key.upper().startswith("PUT-YOUR")
 
 
+def api_key_for(cfg: dict, provider: str) -> str:
+    """The key to send for a provider: its own field first, then the generic one."""
+    if provider in PROVIDERS:
+        own = _clean(cfg.get(PROVIDERS[provider]["key_field"]))
+        if own:
+            return own
+    generic = _clean(cfg.get("api_key"))
+    prefix = PROVIDERS.get(provider, {}).get("key_prefix", "sk-ant-")
+    if generic and (provider not in PROVIDERS or generic.startswith(prefix)
+                    or not generic.upper().startswith("PUT-YOUR")):
+        return generic
+    return ""
+
+
 def resolve_provider(cfg: dict) -> str:
-    """Which backend should answer: 'anthropic', 'openrouter' or 'cli'."""
-    forced = str(cfg.get("provider") or "auto").strip().lower()
-    if forced in ("anthropic", "openrouter", "cli"):
+    """Which backend should answer: 'openrouter', 'groq', 'anthropic' or 'cli'."""
+    forced = _clean(cfg.get("provider")).lower()
+    if forced in ("anthropic", "openrouter", "groq", "cli"):
         return forced
-    if not has_api_key(cfg):
+    # auto: whichever key is actually filled in, OpenRouter first
+    for name in LISTABLE:
+        if _clean(cfg.get(PROVIDERS[name]["key_field"])):
+            return name
+    key = _clean(cfg.get("api_key"))
+    if not key or key.upper().startswith("PUT-YOUR"):
         return "cli"
-    key = str(cfg.get("api_key") or "").strip()
-    model = str(cfg.get("model") or "")
-    if key.startswith("sk-or-") or "/" in model:
+    if key.startswith(PROVIDERS["groq"]["key_prefix"]):
+        return "groq"
+    if key.startswith(PROVIDERS["openrouter"]["key_prefix"]) or "/" in _clean(cfg.get("model")):
         return "openrouter"
     return "anthropic"
 
 
-def openrouter_model(cfg: dict) -> str:
+def model_for(cfg: dict, provider: str = None) -> str:
     """OpenRouter ids look like 'anthropic/claude-...'; add the vendor if missing."""
-    model = str(cfg.get("model") or DEFAULT_CONFIG["model"]).strip()
-    if "/" not in model and model.startswith("claude-"):
+    model = _clean(cfg.get("model")) or DEFAULT_CONFIG["model"]
+    provider = provider or resolve_provider(cfg)
+    if provider == "openrouter" and "/" not in model and model.startswith("claude-"):
         model = "anthropic/" + model
     return model
+
+
+def mask_key(key: str) -> str:
+    """sk-or-v1-abc…wxyz - safe to show in the browser, useless to steal."""
+    key = _clean(key)
+    if not key:
+        return ""
+    if len(key) <= 12:
+        return key[0] + "…" + key[-2:]
+    return key[:8] + "…" + key[-4:]
 
 
 def notes_dir(cfg: dict) -> str:
@@ -296,24 +360,9 @@ def call_anthropic(system: str, messages: list, cfg: dict) -> str:
     return "".join(parts).strip()
 
 
-def suggest_models(wanted: str) -> str:
-    """On an unknown-model error, name a few real OpenRouter ids."""
-    try:
-        req = urllib.request.Request(OPENROUTER_MODELS_URL, headers={"User-Agent": "JARVIS"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        ids = [m.get("id", "") for m in data.get("data", [])]
-    except Exception:
-        return ""
-    term = (wanted or "").split("/")[-1][:12].lower()
-    close = [i for i in ids if term and term in i.lower()][:5]
-    if not close:
-        close = [i for i in ids if i.startswith("anthropic/")][:5]
-    return ", ".join(close)
-
-
-def openrouter_error(exc) -> str:
-    """Turn an OpenRouter HTTP error into something a human can act on."""
+def http_error_text(exc, provider: str) -> str:
+    """Turn a provider HTTP error into something a human can act on."""
+    label = PROVIDERS.get(provider, {}).get("label", provider)
     detail = ""
     try:
         detail = exc.read().decode("utf-8", "replace")
@@ -327,49 +376,120 @@ def openrouter_error(exc) -> str:
         pass
     code = getattr(exc, "code", 0)
     if code in (401, 403):
-        return "OpenRouter rejected the key (%s). Check config.json." % (message or code)
+        return "%s rejected the key (%s). Open Settings and check it." % (label, message or code)
     if code == 402:
-        return "OpenRouter says the account is out of credits: %s" % (message or code)
-    if code == 404 or "model" in str(message).lower() and "not" in str(message).lower():
-        hint = suggest_models(str(message))
-        return ("OpenRouter does not recognise that model (%s). Pick an id from "
-                "https://openrouter.ai/models and set it as \"model\" in config.json.%s"
-                % (message or code, (" Closest matches: " + hint) if hint else ""))
-    return "OpenRouter error %s: %s" % (code, message or exc.reason)
+        return "%s says the account is out of credits: %s" % (label, message or code)
+    if code == 404 or ("model" in str(message).lower() and "not" in str(message).lower()):
+        help_url = PROVIDERS.get(provider, {}).get("models_help", "")
+        hint = suggest_models(provider, str(message))
+        return ("%s does not recognise that model (%s). Open Settings and pick one "
+                "from the list.%s%s"
+                % (label, message or code,
+                   (" " + help_url) if help_url else "",
+                   (" Closest matches: " + hint) if hint else ""))
+    return "%s error %s: %s" % (label, code, message or exc.reason)
 
 
-def call_openrouter(system: str, messages: list, cfg: dict) -> str:
-    """OpenRouter's OpenAI-compatible chat completions endpoint."""
-    base = str(cfg.get("base_url") or "").strip()
-    url = (base.rstrip("/") + "/chat/completions") if base else OPENROUTER_URL
+def suggest_models(provider: str = "openrouter", wanted: str = "") -> str:
+    """On an unknown-model error, name a few ids that actually exist."""
+    info = PROVIDERS.get(provider)
+    if not info:
+        return ""
+    try:
+        ok, models, _ = fetch_models(provider, "", wanted, _clean(load_config().get("base_url")))
+        ids = [m["id"] for m in models] if ok else []
+    except Exception:
+        return ""
+    term = (wanted or "").split("/")[-1][:12].lower()
+    close = [i for i in ids if term and term in i.lower()][:5]
+    if not close:
+        close = ids[:5]
+    return ", ".join(close)
+
+
+def fetch_models(provider: str, key: str, search: str = "", base_url: str = "") -> tuple:
+    """-> (ok, [models], error) from a provider's /models endpoint."""
+    info = PROVIDERS.get(provider)
+    if not info:
+        return False, [], "Unknown provider: %s" % provider
+    url = (base_url.rstrip("/") + "/models") if _clean(base_url) else info["models_url"]
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "JARVIS",
+            "authorization": "Bearer %s" % (key or ""),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return False, [], http_error_text(exc, provider)
+    except urllib.error.URLError as exc:
+        return False, [], "Could not reach %s (%s)." % (info["label"], exc.reason)
+    except ValueError:
+        return False, [], "%s sent something that was not JSON." % info["label"]
+
+    raw = data.get(info["models_key"]) or data.get("data") or data.get("models") or []
+    models = []
+    for m in raw:
+        mid = _clean(m.get("id") or m.get("name"))
+        if not mid:
+            continue
+        pricing = m.get("pricing") or {}
+        models.append({
+            "id": mid,
+            "name": _clean(m.get("name") or m.get("display_name") or mid),
+            "context": m.get("context_length") or m.get("context_window") or 0,
+            "owned_by": _clean(m.get("owned_by") or ""),
+            "prompt": _clean(pricing.get("prompt") if isinstance(pricing, dict) else ""),
+            "completion": _clean(pricing.get("completion") if isinstance(pricing, dict) else ""),
+        })
+    if search:
+        term = search.lower()
+        models = [m for m in models
+                  if term in m["id"].lower() or term in m["name"].lower()]
+    models.sort(key=lambda m: m["id"])
+    return True, models, ""
+
+
+def call_openai_compatible(system: str, messages: list, cfg: dict, provider: str) -> str:
+    """OpenRouter and Groq both speak OpenAI's chat-completions dialect."""
+    info = PROVIDERS[provider]
+    base = _clean(cfg.get("base_url"))
+    url = (base.rstrip("/") + "/chat/completions") if base else info["chat_url"]
+    model = model_for(cfg, provider)
+    if base and provider != resolve_provider(cfg):
+        model = _clean(cfg.get("model")) or model      # a proxy keeps ids as-is
     payload = {
-        "model": openrouter_model(cfg),
+        "model": model,
         "max_tokens": MAX_TOKENS,
         "temperature": 0.7,
         "messages": [{"role": "system", "content": system}] + list(messages),
     }
+    headers = {
+        "content-type": "application/json",
+        "authorization": "Bearer %s" % api_key_for(cfg, provider),
+    }
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = REFERER      # optional, for openrouter.ai rankings
+        headers["X-Title"] = "JARVIS"
     req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "content-type": "application/json",
-            "authorization": "Bearer %s" % str(cfg.get("api_key") or ""),
-            "HTTP-Referer": REFERER,        # optional, for openrouter.ai rankings
-            "X-Title": "JARVIS",
-        },
-        method="POST",
+        url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(openrouter_error(exc))
+        raise RuntimeError(http_error_text(exc, provider))
+    except urllib.error.URLError as exc:
+        raise RuntimeError("Could not reach %s (%s)." % (info["label"], exc.reason))
     choices = data.get("choices") or []
     if not choices:
-        raise RuntimeError("OpenRouter returned no choices: %s" % json.dumps(data)[:300])
+        raise RuntimeError("%s returned no choices: %s" % (info["label"], json.dumps(data)[:300]))
     content = ((choices[0].get("message") or {}).get("content") or "").strip()
     if not content:
-        raise RuntimeError("OpenRouter returned an empty answer.")
+        raise RuntimeError("%s returned an empty answer." % info["label"])
     return content
 
 
@@ -402,8 +522,10 @@ def call_claude_cli(system: str, messages: list, cfg: dict) -> str:
 def answer_question(system: str, messages: list, cfg: dict) -> tuple:
     """-> (answer_text, source_label)"""
     provider = resolve_provider(cfg)
-    if provider == "openrouter":
-        return call_openrouter(system, messages, cfg), "openrouter"
+    if provider in PROVIDERS:
+        if not api_key_for(cfg, provider):
+            return call_claude_cli(system, messages, cfg), "claude-cli"
+        return call_openai_compatible(system, messages, cfg, provider), provider
     if provider == "anthropic":
         try:
             return call_anthropic(system, messages, cfg), "anthropic"
@@ -577,14 +699,126 @@ class JarvisHandler(SimpleHTTPRequestHandler):
         sys.stderr.write("JARVIS %s - %s\n" % (self.address_string(), fmt % args))
 
     # -- chat ------------------------------------------------------------------
+    def do_GET(self):
+        route = self.path.split("?")[0].rstrip("/")
+        if route == "/config":
+            self.send_config()
+        else:
+            super().do_GET()          # static files from viewer/ only
+
     def do_POST(self):
         route = self.path.split("?")[0].rstrip("/")
         if route == "/chat":
             self.handle_chat()
         elif route == "/remember":
             self.handle_remember()
+        elif route == "/config":
+            self.save_config()
+        elif route == "/models":
+            self.handle_models()
         else:
             self.send_json(404, {"error": "Not found: %s" % route})
+
+    # -- settings -------------------------------------------------------------
+    def masked_config(self, cfg: dict) -> dict:
+        """What the browser is allowed to see: never a full key."""
+        provider = resolve_provider(cfg)
+        keys = {}
+        for name, info in PROVIDERS.items():
+            key = _clean(cfg.get(info["key_field"]))
+            generic = _clean(cfg.get("api_key"))
+            if not key and generic.startswith(info["key_prefix"]):
+                key = generic
+            keys[name] = {"saved": bool(key), "masked": mask_key(key)}
+        return {
+            "provider": provider,
+            "available": list(PROVIDERS.keys()),
+            "model": _clean(cfg.get("model")) or DEFAULT_CONFIG["model"],
+            "resolved_model": model_for(cfg, provider),
+            "notes_dir": _clean(cfg.get("notes_dir")),
+            "keys": keys,
+            "anthropic_saved": has_api_key(cfg) and provider == "anthropic",
+        }
+
+    def send_config(self) -> None:
+        self.send_json(200, {"ok": True, "config": self.masked_config(load_config())})
+
+    def save_config(self) -> None:
+        """Store keys in config.json (git-ignored). Keys are never echoed back."""
+        payload = self.read_json()
+        cfg = load_config()
+        if not os.path.exists(CONFIG_PATH):
+            ensure_config()
+            cfg = load_config()
+
+        changed = []
+        for name, info in PROVIDERS.items():
+            value = payload.get(name + "_key")
+            if value is not None:
+                value = str(value).strip()
+                if value and value != "____UNCHANGED____":
+                    cfg[info["key_field"]] = value
+                    changed.append(info["label"])
+                elif not value:
+                    cfg[info["key_field"]] = ""
+        if "provider" in payload:
+            wanted = _clean(payload.get("provider")).lower()
+            if wanted in ("auto", "anthropic", "openrouter", "groq", "cli"):
+                cfg["provider"] = wanted
+                changed.append("provider")
+        if "model" in payload and _clean(payload.get("model")):
+            cfg["model"] = _clean(payload.get("model"))
+            changed.append("model")
+        if "notes_dir" in payload:
+            cfg["notes_dir"] = _clean(payload.get("notes_dir"))
+
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, indent=2)
+                fh.write("\n")
+        except OSError as exc:
+            self.send_json(200, {"ok": False, "error": "Could not write config.json (%s)." % exc})
+            return
+
+        # a new notes folder means the index must be rebuilt
+        if "notes_dir" in payload or "model" in payload or changed:
+            try:
+                load_graph(force=True, cfg=load_config())
+            except Exception:
+                pass
+        self.send_json(200, {
+            "ok": True,
+            "saved": changed,
+            "config": self.masked_config(load_config()),
+        })
+
+    def handle_models(self) -> None:
+        """List the models a provider offers, using the key just typed or saved."""
+        payload = self.read_json()
+        provider = _clean(payload.get("provider")).lower()
+        if provider not in PROVIDERS:
+            self.send_json(200, {"ok": False,
+                                 "error": "Unknown provider '%s'." % (provider or "none")})
+            return
+        key = _clean(payload.get("key"))
+        if not key or key == "____UNCHANGED____":
+            key = api_key_for(load_config(), provider)
+        if not key:
+            self.send_json(200, {"ok": False,
+                                 "error": "Paste your %s key first."
+                                          % PROVIDERS[provider]["label"]})
+            return
+        ok, models, err = fetch_models(provider, key, _clean(payload.get("search")),
+                                       _clean(load_config().get("base_url")))
+        self.send_json(200, {
+            "ok": ok,
+            "error": err,
+            "provider": provider,
+            "label": PROVIDERS[provider]["label"],
+            "count": len(models),
+            "models": models[:500],
+            "help": PROVIDERS[provider]["models_help"],
+        })
 
     def handle_remember(self) -> None:
         """'remember that ...' -> a real markdown note in <notes>/captures/."""
@@ -708,8 +942,8 @@ def main() -> int:
     cfg = ensure_config()
     graph = load_graph()
     provider = resolve_provider(cfg)
-    if provider == "openrouter":
-        mode = "OpenRouter (%s)" % openrouter_model(cfg)
+    if provider in PROVIDERS:
+        mode = "%s (%s)" % (PROVIDERS[provider]["label"], model_for(cfg, provider))
     elif provider == "anthropic":
         mode = "Anthropic API (%s)" % cfg.get("model")
     else:
@@ -720,7 +954,7 @@ def main() -> int:
     print("  notes   : %s  (%d indexed)" % (notes_dir(cfg), len(graph.get("nodes", []))))
     print("  brain   : %s" % mode)
     if provider == "cli":
-        print("            (paste an Anthropic or OpenRouter key into config.json to use the API)")
+        print("            (or open Settings in the browser and paste an OpenRouter or Groq key)")
     print("Ctrl+C to stop.")
 
     ThreadingHTTPServer.allow_reuse_address = True

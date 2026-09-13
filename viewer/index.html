@@ -191,6 +191,79 @@
   }
   #status.on { opacity: .85; }
 
+  /* ---------------- settings ---------------- */
+  #settings-btn {
+    position: fixed; top: 18px; right: 22px; z-index: 9;
+    width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+    background: rgba(8,12,18,.72); border: 1px solid rgba(111,216,255,.22);
+    color: var(--accent); font-size: 17px; line-height: 1;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    transition: background .2s, transform .3s;
+  }
+  #settings-btn:hover { background: rgba(111,216,255,.16); transform: rotate(45deg); }
+  #settings {
+    position: fixed; inset: 0; z-index: 12; display: none;
+    align-items: center; justify-content: center; padding: 24px;
+    background: rgba(2,4,8,.72); backdrop-filter: blur(6px);
+  }
+  #settings.open { display: flex; }
+  #settings .card {
+    width: min(560px, 100%); max-height: 86vh; overflow-y: auto;
+    background: rgba(9,13,20,.97); border: 1px solid var(--panel-border);
+    border-radius: 16px; padding: 24px 26px 26px;
+    box-shadow: 0 30px 90px rgba(0,0,0,.7);
+  }
+  #settings h3 { margin: 0 0 4px; font-size: 17px; font-weight: 500; }
+  #settings .sub { font-size: 11.5px; color: var(--muted); margin-bottom: 18px; line-height: 1.6; }
+  #settings label {
+    display: block; font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); margin: 18px 0 7px;
+  }
+  #settings .keyrow { display: flex; gap: 8px; }
+  #settings input[type=text], #settings input[type=password] {
+    flex: 1; min-width: 0; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.12); color: var(--ink);
+    border-radius: 10px; padding: 11px 13px; font-size: 13px; font-family: inherit;
+    outline: none;
+  }
+  #settings input:focus { border-color: rgba(111,216,255,.55); }
+  #settings .saved { font-size: 11px; color: #6fd8a0; margin-top: 6px; letter-spacing: .04em; }
+  #settings button {
+    border-radius: 10px; border: 1px solid rgba(111,216,255,.3);
+    background: rgba(111,216,255,.10); color: #dff2ff; padding: 11px 15px;
+    font-size: 12.5px; cursor: pointer; font-family: inherit; white-space: nowrap;
+    transition: background .2s;
+  }
+  #settings button:hover { background: rgba(111,216,255,.2); }
+  #settings button.ghost {
+    background: transparent; border-color: rgba(255,255,255,.16); color: var(--muted);
+  }
+  #settings .seg { display: flex; gap: 8px; flex-wrap: wrap; }
+  #settings .seg button.on {
+    background: rgba(111,216,255,.24); border-color: rgba(111,216,255,.7); color: #fff;
+  }
+  #models {
+    margin-top: 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px;
+    max-height: 230px; overflow-y: auto; background: rgba(0,0,0,.35);
+  }
+  #models .m {
+    padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,.06);
+    font-size: 12px; cursor: pointer; display: flex; gap: 10px; align-items: baseline;
+  }
+  #models .m:last-child { border-bottom: 0; }
+  #models .m:hover { background: rgba(111,216,255,.10); }
+  #models .m.on { background: rgba(111,216,255,.18); }
+  #models .m b { font-weight: 500; font-size: 12.5px; }
+  #models .m span { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
+  #models-msg { font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
+  #models-msg.err { color: #ffb4b4; }
+  #models-msg.ok { color: #7fd8a8; }
+  #settings .foot {
+    display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px;
+    padding-top: 18px; border-top: 1px solid rgba(255,255,255,.07);
+  }
+  #settings .note { margin-top: 16px; font-size: 10.5px; color: #5f7387; line-height: 1.7; }
+
   /* ---------------- misc ---------------- */
   #tip .tip-title { font-weight: 600; }
   #tip .tip-group { opacity: .6; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
@@ -260,6 +333,39 @@
       <button type="button" class="icon" id="voice" title="Mute / unmute Jarvis">🔊</button>
     </form>
     <div id="status"></div>
+  </div>
+
+  <button id="settings-btn" title="Settings" aria-label="Settings">⚙</button>
+
+  <div id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="card">
+      <h3 id="settings-title">Settings</h3>
+      <div class="sub">
+        Paste a key, press <em>Show models</em>, pick one. Keys are saved to
+        <code>config.json</code> on your own machine — git-ignored, never committed,
+        and never shown back in full.
+      </div>
+
+      <label>Brain</label>
+      <div class="seg" id="provider-seg"></div>
+
+      <div id="key-blocks"></div>
+
+      <label>Model</label>
+      <div class="keyrow">
+        <input id="model-input" type="text" placeholder="pick one from the list below" />
+        <button type="button" id="load-models">Show models</button>
+      </div>
+      <div id="models"></div>
+      <div id="models-msg"></div>
+
+      <div class="note" id="settings-note"></div>
+
+      <div class="foot">
+        <button type="button" class="ghost" id="settings-cancel">Cancel</button>
+        <button type="button" id="settings-save">Save</button>
+      </div>
+    </div>
   </div>
 
   <div id="boot"><span id="boot-msg">spinning up the galaxy…</span></div>
@@ -1200,6 +1306,200 @@
       } else {
         focusNode(ids[0]);
       }
+    });
+
+    /* ------------------------------------------------------------ settings */
+    /* Paste an OpenRouter or Groq key, list the models it unlocks, pick one. */
+    const settingsEl = document.getElementById('settings');
+    const keyBlocksEl = document.getElementById('key-blocks');
+    const providerSeg = document.getElementById('provider-seg');
+    const modelInput = document.getElementById('model-input');
+    const modelsEl = document.getElementById('models');
+    const modelsMsg = document.getElementById('models-msg');
+
+    let cfgState = { provider: 'cli', model: '', available: [], keys: {} };
+    let chosenProvider = null;
+    let chosenModel = '';
+
+    function providerLabel(name) {
+      return { openrouter: 'OpenRouter', groq: 'Groq', anthropic: 'Anthropic', cli: 'claude -p (no key)' }[name] || name;
+    }
+
+    function renderKeyBlock(name) {
+      const info = (cfgState.keys || {})[name] || {};
+      const wrap = document.createElement('div');
+      const label = document.createElement('label');
+      label.textContent = providerLabel(name) + ' API key';
+      const row = document.createElement('div');
+      row.className = 'keyrow';
+      const input = document.createElement('input');
+      input.type = 'password';
+      input.id = 'key-' + name;
+      input.placeholder = info.saved ? (info.masked + '  (saved — type to replace)') : 'sk-or-v1-…  /  gsk_…';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      const eye = document.createElement('button');
+      eye.type = 'button';
+      eye.className = 'ghost';
+      eye.textContent = 'show';
+      eye.addEventListener('click', () => {
+        input.type = input.type === 'password' ? 'text' : 'password';
+        eye.textContent = input.type === 'password' ? 'show' : 'hide';
+      });
+      row.append(input, eye);
+      wrap.append(label, row);
+      if (info.saved) {
+        const saved = document.createElement('div');
+        saved.className = 'saved';
+        saved.textContent = '✓ saved: ' + info.masked;
+        wrap.appendChild(saved);
+      }
+      return wrap;
+    }
+
+    function renderProviderSeg() {
+      providerSeg.innerHTML = '';
+      const options = ['openrouter', 'groq', 'anthropic', 'cli'];
+      for (const name of options) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = providerLabel(name);
+        if (chosenProvider === name) b.className = 'on';
+        b.addEventListener('click', () => {
+          chosenProvider = name;
+          renderProviderSeg();
+          modelsEl.innerHTML = '';
+          modelsMsg.textContent = (name === 'openrouter' || name === 'groq')
+            ? 'Press “Show models” to fetch what this key can reach.'
+            : '';
+          modelsMsg.className = '';
+        });
+        providerSeg.appendChild(b);
+      }
+    }
+
+    function renderModels(models, current) {
+      modelsEl.innerHTML = '';
+      models.forEach((m) => {
+        const row = document.createElement('div');
+        row.className = 'm' + (m.id === current ? ' on' : '');
+        const id = document.createElement('b');
+        id.textContent = m.id;
+        const meta = document.createElement('span');
+        const bits = [];
+        if (m.context) bits.push(Math.round(m.context / 1000) + 'k ctx');
+        if (m.prompt) bits.push('$' + m.prompt);
+        meta.textContent = bits.join(' · ');
+        row.append(id, meta);
+        row.addEventListener('click', () => {
+          chosenModel = m.id;
+          modelInput.value = m.id;
+          renderModels(models, chosenModel);
+        });
+        modelsEl.appendChild(row);
+      });
+    }
+
+    function setModelsMsg(text, kind) {
+      modelsMsg.textContent = text;
+      modelsMsg.className = kind || '';
+    }
+
+    async function loadModels() {
+      const key = (document.getElementById('key-' + chosenProvider) || {}).value || '';
+      modelsEl.innerHTML = '';
+      setModelsMsg('fetching models from ' + providerLabel(chosenProvider) + '…');
+      try {
+        const res = await fetch('/models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: chosenProvider, key: key.trim() })
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          setModelsMsg(data.error || 'Could not list models.', 'err');
+          return;
+        }
+        if (!data.models.length) {
+          setModelsMsg('No models matched.', 'err');
+          return;
+        }
+        renderModels(data.models, modelInput.value);
+        setModelsMsg(data.count + ' models available. Click one to use it.  ' + (data.help || ''), 'ok');
+      } catch (e) {
+        setModelsMsg('Could not reach the server (' + e + ').', 'err');
+      }
+    }
+
+    async function openSettings() {
+      settingsEl.classList.add('open');
+      modelsEl.innerHTML = '';
+      setModelsMsg('');
+      try {
+        const res = await fetch('/config');
+        const data = await res.json();
+        if (data && data.config) {
+          cfgState = data.config;
+          chosenProvider = cfgState.provider === 'auto' ? 'openrouter' : cfgState.provider;
+          modelInput.value = cfgState.model || '';
+          chosenModel = cfgState.model || '';
+        }
+      } catch (e) {
+        setModelsMsg('Could not read settings from the server (' + e + ').', 'err');
+        chosenProvider = chosenProvider || 'openrouter';
+      }
+      keyBlocksEl.innerHTML = '';
+      keyBlocksEl.append(renderKeyBlock('openrouter'), renderKeyBlock('groq'));
+      renderProviderSeg();
+      const note = document.getElementById('settings-note');
+      if (note) {
+        note.textContent = 'Anthropic uses the api_key field in config.json. '
+          + 'Keys travel only to your own machine (localhost) and are stored in '
+          + 'config.json, which is git-ignored.';
+      }
+    }
+
+    function closeSettings() { settingsEl.classList.remove('open'); }
+
+    async function saveSettings() {
+      const payload = {
+        provider: chosenProvider,
+        model: modelInput.value.trim(),
+        openrouter_key: (document.getElementById('key-openrouter') || {}).value || '',
+        groq_key: (document.getElementById('key-groq') || {}).value || ''
+      };
+      // empty means "leave the saved one alone"
+      if (!payload.openrouter_key) payload.openrouter_key = '____UNCHANGED____';
+      if (!payload.groq_key) payload.groq_key = '____UNCHANGED____';
+      try {
+        const res = await fetch('/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          setModelsMsg(data.error || 'Could not save.', 'err');
+          return;
+        }
+        cfgState = data.config;
+        setModelsMsg('Saved. ' + providerLabel(data.config.provider) + ' · '
+                     + (data.config.resolved_model || data.config.model), 'ok');
+        setTimeout(closeSettings, 900);
+      } catch (e) {
+        setModelsMsg('Could not save (' + e + ').', 'err');
+      }
+    }
+
+    document.getElementById('settings-btn').addEventListener('click', openSettings);
+    document.getElementById('settings-cancel').addEventListener('click', closeSettings);
+    document.getElementById('load-models').addEventListener('click', loadModels);
+    document.getElementById('settings-save').addEventListener('click', saveSettings);
+    settingsEl.addEventListener('click', (e) => {
+      if (e.target === settingsEl) closeSettings();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && settingsEl.classList.contains('open')) closeSettings();
     });
 
     /* ---------------------------------------------------------------- go */

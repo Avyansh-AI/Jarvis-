@@ -40,6 +40,20 @@ class MockProvider(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def do_GET(self):
+        # stand-in for GET /api/v1/models
+        out = json.dumps({"data": [
+            {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet",
+             "context_length": 200000, "pricing": {"prompt": "0.000003", "completion": "0.000015"}},
+            {"id": "groq/llama-3.3-70b", "name": "Llama 3.3 70B",
+             "context_length": 131072, "pricing": {"prompt": "0.00000059", "completion": "0.00000079"}},
+        ]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
         received["path"] = self.path
@@ -88,7 +102,7 @@ def main() -> int:
         "base_url": "http://127.0.0.1:%d/api/v1" % port,
     })
     server.load_config = lambda: cfg
-    server.suggest_models = lambda w: "anthropic/claude-3.5-sonnet, anthropic/claude-3-opus"
+    server.suggest_models = lambda provider, wanted: "anthropic/claude-3.5-sonnet, anthropic/claude-3-opus"
 
     class TestHandler(server.JarvisHandler):
         def __init__(self, payload):
@@ -149,6 +163,39 @@ def main() -> int:
     check("404 names the model and suggests live ids",
           "does not recognise that model" in h4.result[1]["answer"]
           and "anthropic/claude-3.5-sonnet" in h4.result[1]["answer"])
+
+    # 5. Groq is a first-class provider with its own endpoint
+    mode["code"] = 200
+    cfg.update({"provider": "groq", "groq_key": "gsk_TEST", "api_key": "PUT-YOUR-KEY-HERE",
+                "model": "llama-3.3-70b-versatile",
+                "base_url": "http://127.0.0.1:%d/api/v1" % port})
+    check("groq resolved from provider field", server.resolve_provider(cfg) == "groq")
+    check("groq uses its own key field", server.api_key_for(cfg, "groq") == "gsk_TEST")
+    h5 = TestHandler({"question": "where should captured notes live?"})
+    h5.handle_chat()
+    r5 = h5.result[1]
+    check("groq answers through /chat/completions",
+          r5.get("source") == "groq" and r5.get("answer") == MOCK_ANSWER,
+          "source=%s" % r5.get("source"))
+    check("groq sends the groq key, not the anthropic one",
+          (received.get("auth") or "") == "Bearer gsk_TEST")
+
+    # 6. /models listing
+    ok, models, err = server.fetch_models("openrouter", "sk-or-v1-TEST", "",
+                                          "http://127.0.0.1:%d/api/v1" % port)
+    check("/models parses the list",
+          ok and [m["id"] for m in models][0] == "anthropic/claude-3.5-sonnet",
+          "count=%d err=%s" % (len(models), err))
+    check("/models carries context + pricing",
+          models and models[0]["context"] == 200000 and models[0]["prompt"] == "0.000003")
+    filtered = server.fetch_models("openrouter", "sk-or-v1-TEST", "llama",
+                                    "http://127.0.0.1:%d/api/v1" % port)[1]
+    check("/models can be searched", [m["id"] for m in filtered] == ["groq/llama-3.3-70b"])
+
+    # 7. keys are masked on the way back to the browser
+    check("mask hides the middle of a key",
+          server.mask_key("sk-or-v1-abcdefghijklmnop1234") == "sk-or-v1…1234",
+          server.mask_key("sk-or-v1-abcdefghijklmnop1234"))
 
     httpd.shutdown()
 

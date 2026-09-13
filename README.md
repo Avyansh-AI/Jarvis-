@@ -101,6 +101,20 @@ Good first questions: *"Where should captured notes live?"*, *"What are the open
 questions about Jarvis?"*, and something your notes **don't** cover, to hear it
 admit it.
 
+## Settings
+
+Click the **⚙** in the top right. You can paste an **OpenRouter** key and a
+**Groq** key, press **Show models**, and pick from the live list — each entry
+shows its context window and price. Choose **OpenRouter**, **Groq**,
+**Anthropic** or the `claude -p` CLI as the active brain.
+
+Keys are sent only to your own machine (`localhost`) and stored in
+`config.json`, which is git-ignored. The browser never receives a full key back
+— only a masked form like `sk-or-v1…5678`.
+
+You never have to open Settings: `server.py` reads `config.json` on every
+request, so editing that file by hand works exactly the same.
+
 ## How the links are made
 
 Two notes are joined when one `[[wikilinks]]` to the other, or when one note
