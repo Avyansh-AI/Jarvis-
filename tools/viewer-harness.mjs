@@ -44,13 +44,23 @@ class El {
     if (String(kind).startsWith('webgl')) {           // WebGL probe in boot()
       return { getExtension: () => null, getParameter: () => 'stub-gpu' };
     }
-    return {
+    // A 2d context stub. Anything the drawing code calls that we have not
+    // modelled explicitly becomes a no-op, so new canvas art cannot break
+    // the harness.
+    const base = {
       createRadialGradient: () => ({ addColorStop() {} }),
+      createLinearGradient: () => ({ addColorStop() {} }),
       measureText: (t) => ({ width: String(t).length * 20 }),
-      fillText() {}, clearRect() {}, fillRect() {},
-      set fillStyle(v) {}, get fillStyle() { return ''; },
-      font: '', textAlign: '', textBaseline: '', shadowColor: '', shadowBlur: 0,
+      fillStyle: '', strokeStyle: '', font: '', textAlign: '', textBaseline: '',
+      lineWidth: 1, lineJoin: '', lineCap: '', shadowColor: '', shadowBlur: 0,
     };
+    return new Proxy(base, {
+      get(target, prop) {
+        if (prop in target) return target[prop];
+        return () => {};
+      },
+      set(target, prop, value) { target[prop] = value; return true; },
+    });
   }
 }
 const els = new Map();
@@ -219,6 +229,40 @@ check('node objects built for every note',
 check('every node carries a readable label sprite',
       api.nodes.every(n => n.__three && n.__three.label),
       api.nodes.length + ' nodes, ' + api.nodes.filter(n => n.__three && n.__three.label).length + ' labelled');
+/* ---- the dinosaur art is drawn blind, so check it stays on the canvas ---- */
+{
+  const pts = [];
+  const track = (x, y) => pts.push([x, y]);
+  const recorder = new Proxy({}, {
+    get(_t, prop) {
+      if (prop === 'moveTo' || prop === 'lineTo') return (x, y) => track(x, y);
+      if (prop === 'quadraticCurveTo') return (a, b, c, d) => { track(a, b); track(c, d); };
+      if (prop === 'arc') return (x, y, r) => { track(x - r, y - r); track(x + r, y + r); };
+      if (prop === 'ellipse') return (x, y, rx, ry) => { track(x - rx, y - ry); track(x + rx, y + ry); };
+      return () => {};
+    },
+    set() { return true; },
+  });
+  win.__theme.drawChibiDino(recorder, 140, '#ffb454', '#ffd08a', '#c98a3a', '#000');
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  check('chibi dino art fits inside its canvas',
+        pts.length > 20 && minX >= 0 && maxX <= 140 && minY >= 0 && maxY <= 140,
+        'x ' + Math.round(minX) + '..' + Math.round(maxX) +
+        ', y ' + Math.round(minY) + '..' + Math.round(maxY) +
+        ', ' + pts.length + ' points');
+  check('chibi dino fills most of the canvas (not a dot)',
+        (maxX - minX) > 90 && (maxY - minY) > 70,
+        Math.round(maxX - minX) + 'x' + Math.round(maxY - minY) + ' of 140x140');
+  check('shade() keeps colours in range',
+        /^hsl\(\d+,\d+%,\d+%\)$/.test(win.__theme.shade('#ffb454', 0.16)),
+        win.__theme.shade('#ffb454', 0.16));
+}
+
+check('every node is a chibi dinosaur',
+      api.nodes.every(n => n.__three && n.__three.dino),
+      api.nodes.filter(n => n.__three && n.__three.dino).length + '/' + api.nodes.length + ' dinos');
 
 /* ---- boot greeting (Stage 5) ------------------------------------------- */
 const GREET = /^Good (morning|afternoon|evening), sir\. 6 notes indexed, all present and accounted for\.$/;
