@@ -165,7 +165,7 @@ globalThis.fetch = (url, opts) => {
     // from "zebra.md" onward shifts down by one
     const newId = 1;
     const index = [
-      { id: 0, path: 'Upgrading Jarvis.md' },
+      { id: 0, path: 'Upgrading Dio.md' },
       { id: newId, path: 'captures/new-capture.md' },
       ...extra.map((n, i) => ({ id: i + 2, path: n.path })),
     ];
@@ -188,7 +188,7 @@ globalThis.fetch = (url, opts) => {
   return Promise.resolve({
     json: () => Promise.resolve({
       answer: '**Captured notes** live in `captures/`. See the note for details.',
-      nodes: notes, titles: notes.map(() => 'Upgrading Jarvis'),
+      nodes: notes, titles: notes.map(() => 'Upgrading Dio'),
       topic: notes.length ? 'notes' : 'chat', session: 'abc123',
     }),
   });
@@ -244,7 +244,7 @@ await api.ask('where should captured notes live?');
 await new Promise(r => setTimeout(r, 150));   // speech fires on a 60ms timer
 check('1 source -> flies to source',
       calls.cameraPosition.length === 1 && calls.zoomToFit.length === 0);
-check('1 source -> panel shows the note', byIdEl('panel-title').textContent === 'Upgrading Jarvis');
+check('1 source -> panel shows the note', byIdEl('panel-title').textContent === 'Upgrading Dio');
 check('answer text rendered', byIdEl('answer-text').textContent.includes('captures/'));
 check('markdown stripped before speaking',
       globalThis.__spoken.length === 1 && !globalThis.__spoken[0].includes('**'),
@@ -264,13 +264,13 @@ check('small talk -> still answered aloud', globalThis.__spoken.length === 1);
 
 /* ---- cluster vs single fly (Stage 4) ------------------------------------ */
 calls.cameraPosition.length = 0; calls.zoomToFit.length = 0;
-win.dispatchEvent(new globalThis.CustomEvent('jarvis:answer', {
+win.dispatchEvent(new globalThis.CustomEvent('dio:answer', {
   detail: { answer: 'x', nodes: [0, 1, 2, 3], titles: ['a', 'b', 'c', 'd'], topic: 'notes' },
 }));
 check('4+ sources -> frames cluster (zoomToFit)',
       calls.zoomToFit.length === 1 && calls.cameraPosition.length === 0);
 calls.cameraPosition.length = 0; calls.zoomToFit.length = 0;
-win.dispatchEvent(new globalThis.CustomEvent('jarvis:answer', {
+win.dispatchEvent(new globalThis.CustomEvent('dio:answer', {
   detail: { answer: 'x', nodes: [0, 1, 2], titles: ['a', 'b', 'c'], topic: 'notes' },
 }));
 check('3 sources -> single fly',

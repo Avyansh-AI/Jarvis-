@@ -2,7 +2,7 @@
 """
 Offline test for the /chat provider plumbing.
 
-Stands up a mock OpenAI-compatible endpoint on localhost, points JARVIS at it
+Stands up a mock OpenAI-compatible endpoint on localhost, points DIO at it
 via "base_url", and checks the whole path: config -> provider resolution ->
 HTTP request -> parsed answer -> nodes returned for fly-to-source.
 
@@ -104,7 +104,7 @@ def main() -> int:
     server.load_config = lambda: cfg
     server.suggest_models = lambda provider, wanted: "anthropic/claude-3.5-sonnet, anthropic/claude-3-opus"
 
-    class TestHandler(server.JarvisHandler):
+    class TestHandler(server.DioHandler):
         def __init__(self, payload):
             self._p = payload
             self.result = None
@@ -134,7 +134,7 @@ def main() -> int:
     check("butler persona is in the system message",
           "British butler" in received["body"]["messages"][0]["content"])
     check("note context is injected",
-          "[0] Upgrading Jarvis" in received["body"]["messages"][-1]["content"])
+          "[0] Upgrading Dio" in received["body"]["messages"][-1]["content"])
     check("answer parsed from choices[0]", r.get("answer") == MOCK_ANSWER)
     check("source note returned for fly-to-source",
           r.get("nodes") == [0] and r.get("topic") == "notes",

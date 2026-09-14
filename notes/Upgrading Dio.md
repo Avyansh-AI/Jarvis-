@@ -1,6 +1,6 @@
-# Upgrading Jarvis
+# Upgrading Dio
 
-The short version: Jarvis currently knows exactly one thing, and that thing is this note.
+The short version: Dio currently knows exactly one thing, and that thing is this note.
 The galaxy is empty, the index is cold, and the butler has nothing to be butler about.
 This note is the seed. Everything else grows out of it.
 
@@ -14,7 +14,7 @@ getting on with.
 
 ## What good looks like
 
-- **Answers with receipts.** When Jarvis says something, the star it came from should
+- **Answers with receipts.** When Dio says something, the star it came from should
   light up. An answer you cannot trace is a rumour.
 - **A voice, not a text box.** Dry, British, unhurried. Never breathless.
 - **Total recall.** Say "remember that the roaster needs a new gasket" and it should

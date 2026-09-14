@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>JARVIS · Knowledge Galaxy</title>
+<title>DIO · Knowledge Galaxy</title>
 <style>
   :root {
     --accent: #6fd8ff;
@@ -109,7 +109,7 @@
   }
   #panel .close:hover { color: #fff; border-color: rgba(255,255,255,.4); }
 
-  /* ---------------- dock (ask Jarvis) ---------------- */
+  /* ---------------- dock (ask Dio) ---------------- */
   #dock {
     position: fixed; z-index: 8; left: 50%; bottom: 26px;
     transform: translateX(-50%);
@@ -300,9 +300,9 @@
   <div id="graph"></div>
 
   <header id="hud">
-    <div class="mark">Jarvis</div>
+    <div class="mark">Dio</div>
     <div class="sub"><b id="stat-notes">0</b> notes · <b id="stat-links">0</b> threads indexed</div>
-    <div class="hint">Click a star to read it. Ask Jarvis anything at the bottom.</div>
+    <div class="hint">Click a star to read it. Ask Dio anything at the bottom.</div>
   </header>
 
   <div id="legend"></div>
@@ -327,10 +327,10 @@
       <div id="answer-sources"></div>
     </div>
     <form id="ask" autocomplete="off">
-      <input id="q" type="text" placeholder="Ask Jarvis about your notes — or: remember that…" aria-label="Ask Jarvis" />
+      <input id="q" type="text" placeholder="Ask Dio about your notes — or: remember that…" aria-label="Ask Dio" />
       <button type="submit" id="send">Ask</button>
-      <button type="button" class="icon" id="mic" title="Speak to Jarvis (Chrome/Edge)" hidden>🎙</button>
-      <button type="button" class="icon" id="voice" title="Mute / unmute Jarvis">🔊</button>
+      <button type="button" class="icon" id="mic" title="Speak to Dio (Chrome/Edge)" hidden>🎙</button>
+      <button type="button" class="icon" id="voice" title="Mute / unmute Dio">🔊</button>
     </form>
     <div id="status"></div>
   </div>
@@ -384,17 +384,17 @@
     /* If the ESM CDN is unreachable, fall back to the UMD build (no custom
        three.js objects, but the galaxy still renders). */
     window.addEventListener('error', function (e) {
-      if (e && e.target && e.target.tagName === 'SCRIPT' && !window.__jarvisBooted) {
+      if (e && e.target && e.target.tagName === 'SCRIPT' && !window.__dioBooted) {
         umdFallback();
       }
     }, true);
     setTimeout(function () {
-      if (!window.__jarvisBooted) umdFallback();
+      if (!window.__dioBooted) umdFallback();
     }, 12000);
 
     function umdFallback() {
-      if (window.__jarvisFallbackTried) return;
-      window.__jarvisFallbackTried = true;
+      if (window.__dioFallbackTried) return;
+      window.__dioFallbackTried = true;
       var s = document.createElement('script');
       s.src = 'https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/3d-force-graph.min.js';
       s.onload = function () {
@@ -410,7 +410,7 @@
   </script>
   <script type="module">
     /* ------------------------------------------------------------------
-       JARVIS — the galaxy
+       DIO — the galaxy
        ------------------------------------------------------------------ */
     import * as THREE from 'three';
     import ForceGraph3D from 'https://esm.sh/3d-force-graph@1.80.0?external=three';
@@ -509,7 +509,7 @@
     };
 
     window.addEventListener('error', (e) => {
-      if (!window.__jarvisBooted) {
+      if (!window.__dioBooted) {
         window.showBootError('The galaxy failed to start',
           (e && e.message ? e.message : 'Unknown error') +
           (e && e.filename ? '  (' + String(e.filename).split('/').pop() + ':' + e.lineno + ')' : ''));
@@ -518,7 +518,7 @@
 
     /* ---------------------------------------------------------------- boot */
     function boot(ForceGraph3D, THREE) {
-      if (window.__jarvisBooted) return;
+      if (window.__dioBooted) return;
 
       // WebGL is the one hard requirement - say so plainly if it is missing
       let gl = null;
@@ -533,7 +533,7 @@
           'enabled in the browser settings.');
         return;
       }
-      window.__jarvisBooted = true;
+      window.__dioBooted = true;
 
       document.getElementById('stat-notes').textContent = nodes.length;
       document.getElementById('stat-links').textContent = links.length;
@@ -602,7 +602,7 @@
       pendingGreeting = greeting;
       window.showAnswer({ answer: greeting });
 
-      window.dispatchEvent(new CustomEvent('jarvis:ready'));
+      window.dispatchEvent(new CustomEvent('dio:ready'));
     };
 
     /** "Good evening, sir. 12 notes indexed, all present and accounted for." */
@@ -797,7 +797,7 @@
       setFocus([id, ...neighbours], id);
       openPanel(node);
       if (opts.fly !== false) flyTo(node, opts.distance || 110);
-      window.dispatchEvent(new CustomEvent('jarvis:focus', { detail: { id } }));
+      window.dispatchEvent(new CustomEvent('dio:focus', { detail: { id } }));
     }
 
     function flyTo(node, distance = 110) {
@@ -928,7 +928,7 @@
     const statusEl   = document.getElementById('status');
 
     let sessionId = '';
-    try { sessionId = localStorage.getItem('jarvis.session') || ''; } catch (e) {}
+    try { sessionId = localStorage.getItem('dio.session') || ''; } catch (e) {}
 
     window.setStatus = function (msg) {
       statusEl.textContent = msg || '';
@@ -976,11 +976,11 @@
         .then(data => {
           if (data.session) {
             sessionId = data.session;
-            try { localStorage.setItem('jarvis.session', sessionId); } catch (e) {}
+            try { localStorage.setItem('dio.session', sessionId); } catch (e) {}
           }
           window.showAnswer(data);
           window.setStatus('');
-          window.dispatchEvent(new CustomEvent('jarvis:answer', { detail: data }));
+          window.dispatchEvent(new CustomEvent('dio:answer', { detail: data }));
           return data;
         })
         .catch(() => {
@@ -1005,7 +1005,7 @@
     let voice = null;          // chosen SpeechSynthesisVoice
     let audioReady = false;    // has the user interacted yet?
     let voiceOn = true;
-    try { voiceOn = localStorage.getItem('jarvis.voice') !== 'off'; } catch (e) {}
+    try { voiceOn = localStorage.getItem('dio.voice') !== 'off'; } catch (e) {}
 
     function pickVoice() {
       if (!synth) return;
@@ -1018,7 +1018,7 @@
         en.find(v => /gb/i.test(v.name || '')) ||
         en.find(v => /^en[-]?US/i.test(v.lang || '')) ||
         en[0] || voices[0] || null;
-      if (voice) console.log('JARVIS voice:', voice.name, voice.lang);
+      if (voice) console.log('DIO voice:', voice.name, voice.lang);
     }
     if (synth) {
       pickVoice();
@@ -1087,10 +1087,10 @@
 
     voiceBtn.addEventListener('click', () => {
       voiceOn = !voiceOn;
-      try { localStorage.setItem('jarvis.voice', voiceOn ? 'on' : 'off'); } catch (e) {}
+      try { localStorage.setItem('dio.voice', voiceOn ? 'on' : 'off'); } catch (e) {}
       voiceBtn.textContent = voiceOn ? '🔊' : '🔇';
       voiceBtn.classList.toggle('muted', !voiceOn);
-      voiceBtn.title = voiceOn ? 'Mute Jarvis' : 'Unmute Jarvis';
+      voiceBtn.title = voiceOn ? 'Mute Dio' : 'Unmute Dio';
       if (!voiceOn) window.stopSpeaking(); else window.speak('Voice restored, sir.');
     });
     voiceBtn.textContent = voiceOn ? '🔊' : '🔇';
@@ -1279,17 +1279,17 @@
       return s;
     };
 
-    window.addEventListener('jarvis:answer', (e) => {
+    window.addEventListener('dio:answer', (e) => {
       const data = e.detail || {};
       if (data.answer) window.speak(window.speakable(data.answer));
     });
 
     /* ------------------------------------------------- fly to the source */
-    /* When Jarvis answers from a note, prove it: fly to the top source,
+    /* When Dio answers from a note, prove it: fly to the top source,
        light it and its neighbours, and open its panel. If the answer drew on
        four or more notes, light the whole cluster and frame it instead.
        Small talk returns no nodes, so the camera stays exactly where it is. */
-    window.addEventListener('jarvis:answer', (e) => {
+    window.addEventListener('dio:answer', (e) => {
       const data = e.detail || {};
       const ids = (data.nodes || []).filter(i => Number.isInteger(i) && byId.has(i));
       if (!ids.length) return;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-JARVIS - web server + brain.
+DIO - web server + brain.
 
 Serves ONLY the viewer/ folder on port 4700 and exposes the chat brain:
 
@@ -39,7 +39,7 @@ VIEWER_DIR = os.path.join(HERE, "viewer")
 GRAPH_DATA_JS = os.path.join(VIEWER_DIR, "graph-data.js")
 CONFIG_PATH = os.path.join(HERE, "config.json")
 
-PORT = int(os.environ.get("JARVIS_PORT", "4700"))
+PORT = int(os.environ.get("DIO_PORT", "4700"))
 DEFAULT_NOTES_DIR = os.path.join(HERE, "notes")
 
 # --- tuning ------------------------------------------------------------------
@@ -90,7 +90,7 @@ PROVIDERS = {
 LISTABLE = ("openrouter", "groq")
 
 BUTLER_PROMPT = """\
-You are JARVIS, the user's knowledge system, and you speak as a dry, impeccably \
+You are DIO, the user's knowledge system, and you speak as a dry, impeccably \
 polite British butler with a razor wit.
 
 Character:
@@ -133,9 +133,9 @@ def ensure_config() -> dict:
             with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
                 json.dump(DEFAULT_CONFIG, fh, indent=2)
                 fh.write("\n")
-            print("JARVIS: created %s - paste your Anthropic API key in there." % CONFIG_PATH)
+            print("DIO: created %s - paste your Anthropic API key in there." % CONFIG_PATH)
         except OSError as exc:  # read-only disk, etc.
-            print("JARVIS: could not write config.json (%s)" % exc, file=sys.stderr)
+            print("DIO: could not write config.json (%s)" % exc, file=sys.stderr)
         return dict(DEFAULT_CONFIG)
     return load_config()
 
@@ -146,7 +146,7 @@ def load_config() -> dict:
         with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
             cfg.update(json.load(fh))
     except (OSError, ValueError) as exc:
-        print("JARVIS: config.json unreadable (%s) - using defaults." % exc, file=sys.stderr)
+        print("DIO: config.json unreadable (%s) - using defaults." % exc, file=sys.stderr)
     return cfg
 
 
@@ -218,7 +218,7 @@ def mask_key(key: str) -> str:
 
 
 def notes_dir(cfg: dict) -> str:
-    raw = cfg.get("notes_dir") or os.environ.get("JARVIS_NOTES") or DEFAULT_NOTES_DIR
+    raw = cfg.get("notes_dir") or os.environ.get("DIO_NOTES") or DEFAULT_NOTES_DIR
     return os.path.abspath(os.path.expanduser(str(raw)))
 
 
@@ -266,7 +266,7 @@ def load_graph(force: bool = False, cfg: dict = None) -> dict:
             _GRAPH_CACHE["graph"] = graph
             _GRAPH_CACHE["stamp"] = max(stamp, time.time())
         else:
-            print("JARVIS: notes folder not found: %s" % root, file=sys.stderr)
+            print("DIO: notes folder not found: %s" % root, file=sys.stderr)
             _GRAPH_CACHE["graph"] = graph_from_js()
             _GRAPH_CACHE["stamp"] = stamp
     return _GRAPH_CACHE["graph"]
@@ -416,7 +416,7 @@ def fetch_models(provider: str, key: str, search: str = "", base_url: str = "") 
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "JARVIS",
+            "User-Agent": "DIO",
             "authorization": "Bearer %s" % (key or ""),
         },
     )
@@ -473,7 +473,7 @@ def call_openai_compatible(system: str, messages: list, cfg: dict, provider: str
     }
     if provider == "openrouter":
         headers["HTTP-Referer"] = REFERER      # optional, for openrouter.ai rankings
-        headers["X-Title"] = "JARVIS"
+        headers["X-Title"] = "DIO"
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
     )
@@ -675,8 +675,8 @@ def remember_turn(session: dict, question: str, answer: str) -> None:
 # ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
-class JarvisHandler(SimpleHTTPRequestHandler):
-    server_version = "JARVIS/1.0"
+class DioHandler(SimpleHTTPRequestHandler):
+    server_version = "DIO/1.0"
 
     def __init__(self, *args, **kwargs):
         kwargs["directory"] = VIEWER_DIR
@@ -696,7 +696,7 @@ class JarvisHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("JARVIS %s - %s\n" % (self.address_string(), fmt % args))
+        sys.stderr.write("DIO %s - %s\n" % (self.address_string(), fmt % args))
 
     # -- chat ------------------------------------------------------------------
     def do_GET(self):
@@ -937,7 +937,7 @@ class JarvisHandler(SimpleHTTPRequestHandler):
 
 def main() -> int:
     if not os.path.isdir(VIEWER_DIR):
-        print("JARVIS: viewer/ folder missing. Run: python3 build.py", file=sys.stderr)
+        print("DIO: viewer/ folder missing. Run: python3 build.py", file=sys.stderr)
         return 1
     cfg = ensure_config()
     graph = load_graph()
@@ -949,7 +949,7 @@ def main() -> int:
     else:
         mode = "`claude -p` CLI"
 
-    print("JARVIS online -> http://localhost:%d" % PORT)
+    print("DIO online -> http://localhost:%d" % PORT)
     print("  serving : %s  (only this folder is reachable)" % VIEWER_DIR)
     print("  notes   : %s  (%d indexed)" % (notes_dir(cfg), len(graph.get("nodes", []))))
     print("  brain   : %s" % mode)
@@ -959,19 +959,19 @@ def main() -> int:
 
     ThreadingHTTPServer.allow_reuse_address = True
     try:
-        httpd = ThreadingHTTPServer(("0.0.0.0", PORT), JarvisHandler)
+        httpd = ThreadingHTTPServer(("0.0.0.0", PORT), DioHandler)
     except OSError as exc:
         if getattr(exc, "errno", None) in (98, 48, 10048):   # address already in use
-            print("JARVIS: port %d is already in use." % PORT, file=sys.stderr)
+            print("DIO: port %d is already in use." % PORT, file=sys.stderr)
             print("        Something is already serving it (another server.py?), "
-                  "or try: JARVIS_PORT=%d python3 server.py" % (PORT + 1), file=sys.stderr)
+                  "or try: DIO_PORT=%d python3 server.py" % (PORT + 1), file=sys.stderr)
             return 1
         raise
     with httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
-            print("\nJARVIS: shutting down.")
+            print("\nDIO: shutting down.")
     return 0
 
 
