@@ -1,0 +1,1640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DIO · Knowledge Jungle</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🦖</text></svg>" />
+<style>
+  :root {
+    --accent: #6fd8ff;
+    --accent-dim: #2a7f9e;
+    --ink: #e9f2fa;
+    --muted: #8fa3b5;
+    --panel-bg: rgba(8, 12, 18, 0.82);
+    --panel-border: rgba(111, 216, 255, 0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #000; color: var(--ink); overflow: hidden;
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* deep-space backdrop (sits behind the transparent WebGL canvas) */
+  body {
+    background:
+      radial-gradient(1100px 700px at 22% 18%, rgba(150, 84, 26, 0.30), transparent 62%),
+      radial-gradient(900px 620px at 82% 78%, rgba(22, 92, 78, 0.28), transparent 64%),
+      radial-gradient(700px 500px at 60% 40%, rgba(86, 42, 104, 0.22), transparent 70%),
+      #05070a;
+  }
+  #graph { position: fixed; inset: 0; z-index: 1; }
+  #graph canvas { display: block; outline: none; }
+
+  /* ---------------- HUD ---------------- */
+  #hud {
+    position: fixed; top: 20px; left: 24px; z-index: 6;
+    pointer-events: none; user-select: none;
+  }
+  #hud .mark {
+    font-size: 26px; font-weight: 200; letter-spacing: 0.42em;
+    text-transform: uppercase; color: #eaf6ff;
+    text-shadow: 0 0 26px rgba(111, 216, 255, 0.55);
+  }
+  #hud .sub {
+    margin-top: 6px; font-size: 11.5px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  #hud .sub b { color: var(--accent); font-weight: 500; }
+
+  /* ---------------- legend ---------------- */
+  #legend {
+    position: fixed; left: 24px; bottom: 22px; z-index: 6;
+    display: flex; flex-direction: column; gap: 7px;
+    pointer-events: none; user-select: none;
+  }
+  #legend .row {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  #legend .dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 12px currentColor; background: currentColor; }
+
+  /* ---------------- side panel ---------------- */
+  #panel {
+    position: fixed; top: 0; right: 0; z-index: 7;
+    width: min(420px, 92vw); height: 100%;
+    background: var(--panel-bg);
+    border-left: 1px solid var(--panel-border);
+    backdrop-filter: blur(16px) saturate(120%);
+    -webkit-backdrop-filter: blur(16px) saturate(120%);
+    transform: translateX(102%);
+    transition: transform .45s cubic-bezier(.22,.61,.36,1);
+    display: flex; flex-direction: column;
+  }
+  #panel.open { transform: translateX(0); }
+  #panel .head { padding: 26px 26px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  #panel .chip {
+    display: inline-block; font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 999px; margin-bottom: 12px;
+    border: 1px solid currentColor; color: var(--accent);
+  }
+  #panel h2 { margin: 0; font-size: 21px; font-weight: 500; line-height: 1.25; }
+  #panel .meta { margin-top: 10px; font-size: 11.5px; color: var(--muted); letter-spacing: .05em; }
+  #panel .body {
+    padding: 20px 26px 26px; overflow-y: auto; flex: 1;
+    font-size: 14px; line-height: 1.72; color: #cfe0ee; white-space: pre-wrap;
+  }
+  #panel .body::-webkit-scrollbar { width: 8px; }
+  #panel .body::-webkit-scrollbar-thumb { background: rgba(111,216,255,.18); border-radius: 8px; }
+  #panel .related { padding: 0 26px 26px; }
+  #panel .related h3 {
+    margin: 0 0 10px; font-size: 10.5px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500;
+  }
+  #panel .related .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  #panel .related button {
+    background: rgba(111,216,255,.07); border: 1px solid rgba(111,216,255,.22);
+    color: #dff2ff; border-radius: 999px; padding: 6px 12px;
+    font-size: 12px; cursor: pointer; transition: background .2s, transform .2s;
+    font-family: inherit;
+  }
+  #panel .related button:hover { background: rgba(111,216,255,.18); transform: translateY(-1px); }
+  #panel .close {
+    position: absolute; top: 18px; right: 18px; width: 30px; height: 30px;
+    border-radius: 50%; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.04); color: var(--muted);
+    font-size: 16px; line-height: 1; cursor: pointer;
+  }
+  #panel .close:hover { color: #fff; border-color: rgba(255,255,255,.4); }
+
+  /* ---------------- dock (ask Dio) ---------------- */
+  #dock {
+    position: fixed; z-index: 8; left: 50%; bottom: 26px;
+    transform: translateX(-50%);
+    width: min(760px, calc(100vw - 48px));
+    transition: transform .45s cubic-bezier(.22,.61,.36,1);
+  }
+  body.panel-open #dock { transform: translateX(calc(-50% - 200px)); }
+  @media (max-width: 1180px) { body.panel-open #dock { transform: translateX(-50%); } }
+
+  #answer {
+    margin-bottom: 12px; padding: 16px 20px;
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
+    border-radius: 14px; backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 18px 60px rgba(0,0,0,.55);
+    opacity: 0; transform: translateY(10px); pointer-events: none;
+    transition: opacity .35s ease, transform .35s ease;
+    max-height: 34vh; overflow-y: auto;
+  }
+  #answer.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  #answer-text { font-size: 15px; line-height: 1.65; color: #e6f2fb; white-space: pre-wrap; }
+  #answer-sources {
+    margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  #answer-sources .src-label,
+  #answer-sources .src {
+    font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+  }
+  #answer-sources .src-label { color: var(--muted); }
+  #answer-sources .src {
+    padding: 4px 10px; border-radius: 999px;
+    border: 1px solid rgba(111,216,255,.28); background: rgba(111,216,255,.08);
+    color: #d8eeff; letter-spacing: .06em; text-transform: none; font-size: 11.5px;
+  }
+  #answer-sources .src-link {
+    cursor: pointer; font-family: inherit;
+    transition: background .2s, border-color .2s, transform .15s;
+  }
+  #answer-sources .src-link:hover {
+    background: rgba(111,216,255,.22); border-color: rgba(111,216,255,.65);
+    transform: translateY(-1px);
+  }
+
+  #ask { display: flex; gap: 10px; align-items: center; }
+  #ask input {
+    flex: 1; min-width: 0;
+    background: rgba(8,12,18,.82); border: 1px solid rgba(111,216,255,.22);
+    color: var(--ink); border-radius: 12px; padding: 14px 18px;
+    font-size: 15px; font-family: inherit; outline: none;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    transition: border-color .25s, box-shadow .25s;
+  }
+  #ask input::placeholder { color: #5f7387; }
+  #ask input:focus { border-color: rgba(111,216,255,.6); box-shadow: 0 0 0 4px rgba(111,216,255,.08); }
+  #ask button {
+    border-radius: 12px; border: 1px solid rgba(111,216,255,.3);
+    background: rgba(111,216,255,.10); color: #dff2ff;
+    padding: 14px 20px; font-size: 14px; cursor: pointer; font-family: inherit;
+    letter-spacing: .06em; transition: background .2s, transform .15s, border-color .2s;
+    white-space: nowrap;
+  }
+  #ask button:hover { background: rgba(111,216,255,.2); }
+  #ask button:active { transform: translateY(1px); }
+  #ask button.icon { padding: 14px 16px; font-size: 16px; }
+  #ask button[disabled] { opacity: .45; cursor: default; }
+  #ask button.icon.active {
+    background: rgba(255, 96, 96, .22); border-color: rgba(255, 130, 130, .65);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  #ask button.icon.muted { opacity: .4; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 110, 110, .45); }
+    50%      { box-shadow: 0 0 0 10px rgba(255, 110, 110, 0); }
+  }
+  #status {
+    height: 16px; margin-top: 8px; text-align: center;
+    font-size: 11.5px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent); opacity: 0; transition: opacity .25s;
+  }
+  #status.on { opacity: .85; }
+
+  /* ---------------- settings ---------------- */
+  #settings-btn {
+    position: fixed; top: 18px; right: 22px; z-index: 9;
+    width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+    background: rgba(8,12,18,.72); border: 1px solid rgba(111,216,255,.22);
+    color: var(--accent); font-size: 17px; line-height: 1;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    transition: background .2s, transform .3s;
+  }
+  #settings-btn:hover { background: rgba(111,216,255,.16); transform: rotate(45deg); }
+  #settings {
+    position: fixed; inset: 0; z-index: 12; display: none;
+    align-items: center; justify-content: center; padding: 24px;
+    background: rgba(2,4,8,.72); backdrop-filter: blur(6px);
+  }
+  #settings.open { display: flex; }
+  #settings .card {
+    width: min(560px, 100%); max-height: 86vh; overflow-y: auto;
+    background: rgba(9,13,20,.97); border: 1px solid var(--panel-border);
+    border-radius: 16px; padding: 24px 26px 26px;
+    box-shadow: 0 30px 90px rgba(0,0,0,.7);
+  }
+  #settings h3 { margin: 0 0 4px; font-size: 17px; font-weight: 500; }
+  #settings .sub { font-size: 11.5px; color: var(--muted); margin-bottom: 18px; line-height: 1.6; }
+  #settings label {
+    display: block; font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); margin: 18px 0 7px;
+  }
+  #settings .keyrow { display: flex; gap: 8px; }
+  #settings input[type=text], #settings input[type=password] {
+    flex: 1; min-width: 0; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.12); color: var(--ink);
+    border-radius: 10px; padding: 11px 13px; font-size: 13px; font-family: inherit;
+    outline: none;
+  }
+  #settings input:focus { border-color: rgba(111,216,255,.55); }
+  #settings .saved { font-size: 11px; color: #6fd8a0; margin-top: 6px; letter-spacing: .04em; }
+  #settings button {
+    border-radius: 10px; border: 1px solid rgba(111,216,255,.3);
+    background: rgba(111,216,255,.10); color: #dff2ff; padding: 11px 15px;
+    font-size: 12.5px; cursor: pointer; font-family: inherit; white-space: nowrap;
+    transition: background .2s;
+  }
+  #settings button:hover { background: rgba(111,216,255,.2); }
+  #settings button.ghost {
+    background: transparent; border-color: rgba(255,255,255,.16); color: var(--muted);
+  }
+  #settings .seg { display: flex; gap: 8px; flex-wrap: wrap; }
+  #settings .seg button.on {
+    background: rgba(111,216,255,.24); border-color: rgba(111,216,255,.7); color: #fff;
+  }
+  #models {
+    margin-top: 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px;
+    max-height: 230px; overflow-y: auto; background: rgba(0,0,0,.35);
+  }
+  #models .m {
+    padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,.06);
+    font-size: 12px; cursor: pointer; display: flex; gap: 10px; align-items: baseline;
+  }
+  #models .m:last-child { border-bottom: 0; }
+  #models .m:hover { background: rgba(111,216,255,.10); }
+  #models .m.on { background: rgba(111,216,255,.18); }
+  #models .m b { font-weight: 500; font-size: 12.5px; }
+  #models .m span { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
+  #models-msg { font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
+  #models-msg.err { color: #ffb4b4; }
+  #models-msg.ok { color: #7fd8a8; }
+  #settings .foot {
+    display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px;
+    padding-top: 18px; border-top: 1px solid rgba(255,255,255,.07);
+  }
+  #settings .note { margin-top: 16px; font-size: 10.5px; color: #5f7387; line-height: 1.7; }
+
+  /* ---------------- misc ---------------- */
+  #tip .tip-title { font-weight: 600; }
+  #tip .tip-group { opacity: .6; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+  #boot {
+    position: fixed; inset: 0; z-index: 20; display: flex; align-items: center;
+    justify-content: center; background: #000; color: var(--muted);
+    font-size: 13px; letter-spacing: .18em; text-transform: uppercase;
+    transition: opacity .8s ease; text-align: center; padding: 24px;
+  }
+  #boot.hidden { opacity: 0; pointer-events: none; }
+  #boot .err {
+    max-width: 620px; line-height: 1.7; text-transform: none; letter-spacing: .02em;
+    color: #ffb4b4; font-size: 13px; text-align: left;
+    background: rgba(255,80,80,.07); border: 1px solid rgba(255,120,120,.3);
+    padding: 18px 20px; border-radius: 12px;
+  }
+  #boot .err h4 { margin: 0 0 10px; color: #ffd9d9; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; }
+  #boot .err pre {
+    margin: 12px 0 0; white-space: pre-wrap; word-break: break-word;
+    font-size: 11.5px; color: #9fb3c6; font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  #boot .err button {
+    margin-top: 16px; padding: 9px 16px; border-radius: 10px; cursor: pointer;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25);
+    color: #fff; font-size: 12px; font-family: inherit;
+  }
+  @media (max-width: 640px) {
+    #hud .mark { font-size: 18px; }
+    #legend { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div id="graph"></div>
+
+  <header id="hud">
+    <div class="mark">Dio</div>
+    <div class="sub"><b id="stat-notes">0</b> notes · <b id="stat-links">0</b> threads indexed</div>
+    <div class="hint">🦕 Click a dino to read it. Ask Dio anything at the bottom.</div>
+  </header>
+
+  <div id="legend"></div>
+
+  <aside id="panel" aria-hidden="true">
+    <button class="close" id="panel-close" title="Close">×</button>
+    <div class="head">
+      <span class="chip" id="panel-group">notes</span>
+      <h2 id="panel-title">Note</h2>
+      <div class="meta" id="panel-meta"></div>
+    </div>
+    <div class="body" id="panel-body"></div>
+    <div class="related" id="panel-related">
+      <h3>Linked notes</h3>
+      <div class="chips" id="panel-chips"></div>
+    </div>
+  </aside>
+
+  <div id="dock">
+    <div id="answer">
+      <div id="answer-text"></div>
+      <div id="answer-sources"></div>
+    </div>
+    <form id="ask" autocomplete="off">
+      <input id="q" type="text" placeholder="Ask Dio about your notes — or: remember that…" aria-label="Ask Dio" />
+      <button type="submit" id="send">Ask</button>
+      <button type="button" class="icon" id="mic" title="Speak to Dio (Chrome/Edge)" hidden>🎙</button>
+      <button type="button" class="icon" id="voice" title="Mute / unmute Dio">🔊</button>
+    </form>
+    <div id="status"></div>
+  </div>
+
+  <button id="settings-btn" title="Settings" aria-label="Settings">⚙</button>
+
+  <div id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="card">
+      <h3 id="settings-title">Settings</h3>
+      <div class="sub">
+        Paste a key, press <em>Show models</em>, pick one. Keys are saved to
+        <code>config.json</code> on your own machine — git-ignored, never committed,
+        and never shown back in full.
+      </div>
+
+      <label>Brain</label>
+      <div class="seg" id="provider-seg"></div>
+
+      <div id="key-blocks"></div>
+
+      <label>Model</label>
+      <div class="keyrow">
+        <input id="model-input" type="text" placeholder="pick one from the list below" />
+        <button type="button" id="load-models">Show models</button>
+      </div>
+      <div id="models"></div>
+      <div id="models-msg"></div>
+
+      <div class="note" id="settings-note"></div>
+
+      <div class="foot">
+        <button type="button" class="ghost" id="settings-cancel">Cancel</button>
+        <button type="button" id="settings-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="boot"><span id="boot-msg">spinning up the galaxy…</span></div>
+
+  <!-- three + 3d-force-graph straight from a CDN. No npm, no build step. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://esm.sh/three@0.180.0",
+      "three/": "https://esm.sh/three@0.180.0/"
+    }
+  }
+  </script>
+  <script src="graph-data.js"></script>
+  <script>
+    /* If the ESM CDN is unreachable, fall back to the UMD build (no custom
+       three.js objects, but the galaxy still renders). */
+    window.addEventListener('error', function (e) {
+      if (e && e.target && e.target.tagName === 'SCRIPT' && !window.__dioBooted) {
+        umdFallback();
+      }
+    }, true);
+    setTimeout(function () {
+      if (!window.__dioBooted) umdFallback();
+    }, 12000);
+
+    function umdFallback() {
+      if (window.__dioFallbackTried) return;
+      window.__dioFallbackTried = true;
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/3d-force-graph.min.js';
+      s.onload = function () {
+        if (window.ForceGraph3D) boot(window.ForceGraph3D, null);
+      };
+      s.onerror = function () {
+        var b = document.getElementById('boot-msg');
+        if (b) b.className = 'err',
+          b.textContent = 'Could not load 3d-force-graph from the CDN. Check your network connection (esm.sh / cdn.jsdelivr.net must be reachable) and reload.';
+      };
+      document.head.appendChild(s);
+    }
+  </script>
+  <script type="module">
+    /* ------------------------------------------------------------------
+       DIO — the galaxy
+       ------------------------------------------------------------------ */
+    import * as THREE from 'three';
+    import ForceGraph3D from 'https://esm.sh/3d-force-graph@1.80.0?external=three';
+
+    /* prehistoric chibi palette: amber, leaf, river, berry, volcano */
+    const PALETTE = [
+      '#ffb454', '#7ee08a', '#5ec8ff', '#ff7a8a',
+      '#c69cff', '#ffe066', '#4fd1c5', '#ff9f45'
+    ];
+    const BASE_LINK = 'rgba(255,196,120,0.24)';
+    const DIM_LINK  = 'rgba(255,196,120,0.05)';
+    const HOT_LINK  = 'rgba(255,224,160,0.95)';
+
+    const mount  = document.getElementById('graph');
+    const panel  = document.getElementById('panel');
+    const legend = document.getElementById('legend');
+
+    const nodes   = (window.GRAPH && GRAPH.nodes) ? GRAPH.nodes : [];
+    const links   = (window.GRAPH && GRAPH.links) ? GRAPH.links : [];
+    const byId    = new Map(nodes.map(n => [n.id, n]));
+    const adj     = new Map(nodes.map(n => [n.id, new Set()]));
+    for (const l of links) {
+      const a = idOf(l.source), b = idOf(l.target);
+      if (adj.has(a)) adj.get(a).add(b);
+      if (adj.has(b)) adj.get(b).add(a);
+    }
+
+    let graph = null;
+    let focusSet = null;          // null = nothing focused
+    let focusPrimary = null;      // the node the answer actually came from
+    const CLUSTER_MIN = 4;        // 4+ sources: light the cluster, don't dive in
+    let driftUntil = 0;           // timestamp: idle drift resumes after this
+    let driftAngle = 0;
+    let stars = null;
+    let pulses = [];              // [{node, until}]
+
+    function idOf(x) { return (x && typeof x === 'object') ? x.id : x; }
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+    function colorFor(group) {
+      let h = 0;
+      const s = String(group || 'notes');
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      return PALETTE[h % PALETTE.length];
+    }
+    function pauseDrift(ms) { driftUntil = performance.now() + ms; }
+
+    window.__galaxy = { focusNode, clearFocus, flyTo, nodes, byId, get graph() { return graph; } };
+
+    /* ------------------------------------------------------------ failures */
+    /* If anything goes wrong the galaxy says so on screen instead of showing
+       a black void - including why, and what the browser is missing. */
+    function diagnostics() {
+      const lines = [];
+      lines.push('notes indexed      : ' + nodes.length);
+      lines.push('links              : ' + links.length);
+      let gl = null;
+      try {
+        const c = document.createElement('canvas');
+        gl = c.getContext('webgl2') || c.getContext('webgl');
+      } catch (e) { /* handled below */ }
+      lines.push('webgl              : ' + (gl ? 'available' : 'NOT AVAILABLE'));
+      if (gl && gl.getExtension) {
+        try {
+          const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+          if (dbg) lines.push('gpu                : ' + gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL));
+        } catch (e) { /* optional */ }
+      }
+      lines.push('speech synthesis   : ' + (typeof speechSynthesis !== 'undefined' ? 'yes' : 'no'));
+      lines.push('speech recognition : ' + (!!(window.SpeechRecognition || window.webkitSpeechRecognition) ? 'yes' : 'no'));
+      // diagnostics must never be the thing that throws
+      lines.push('page               : ' + (typeof location !== 'undefined' ? location.href : '?'));
+      lines.push('user agent         : ' + (typeof navigator !== 'undefined' ? navigator.userAgent : '?'));
+      return lines.join('\n');
+    }
+
+    window.showBootError = function (title, detail) {
+      const bootEl = document.getElementById('boot');
+      if (!bootEl) return;
+      bootEl.classList.remove('hidden');
+      const box = document.createElement('div');
+      box.className = 'err';
+      const h = document.createElement('h4');
+      h.textContent = title;
+      const body = document.createElement('div');
+      body.textContent = detail || '';
+      const pre = document.createElement('pre');
+      pre.textContent = diagnostics();
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Reload';
+      btn.addEventListener('click', () => location.reload());
+      box.append(h, body, pre, btn);
+      bootEl.innerHTML = '';
+      bootEl.appendChild(box);
+    };
+
+    window.addEventListener('error', (e) => {
+      if (!window.__dioBooted) {
+        window.showBootError('The galaxy failed to start',
+          (e && e.message ? e.message : 'Unknown error') +
+          (e && e.filename ? '  (' + String(e.filename).split('/').pop() + ':' + e.lineno + ')' : ''));
+      }
+    });
+
+    /* ---------------------------------------------------------------- boot */
+    function boot(ForceGraph3D, THREE) {
+      if (window.__dioBooted) return;
+
+      // WebGL is the one hard requirement - say so plainly if it is missing
+      let gl = null;
+      try {
+        const probe = document.createElement('canvas');
+        gl = probe.getContext('webgl2') || probe.getContext('webgl');
+      } catch (e) { gl = null; }
+      if (!gl) {
+        window.showBootError('This browser cannot draw the galaxy',
+          'The galaxy needs WebGL, and this browser did not provide it. Try a recent ' +
+          'Chrome, Edge, Firefox or Safari, and check that hardware acceleration is ' +
+          'enabled in the browser settings.');
+        return;
+      }
+      window.__dioBooted = true;
+
+      document.getElementById('stat-notes').textContent = nodes.length;
+      document.getElementById('stat-links').textContent = links.length;
+
+      graph = ForceGraph3D()(mount)
+        .graphData({ nodes, links })
+        .backgroundColor('rgba(0,0,0,0)')
+        .showNavInfo(false)
+        .enableNodeDrag(false)
+        .nodeRelSize(4)
+        .nodeVal(n => 1 + Math.min(6, (n.degree || 0) * 0.7))
+        .nodeColor(n => colorFor(n.group))
+        .nodeOpacity(0.95)
+        .nodeLabel(n => `<div id="tip"><div class="tip-title">${esc(n.label)}</div>` +
+                        `<div class="tip-group">${esc(n.group)}</div></div>`)
+        .linkWidth(0.5)
+        .linkOpacity(0.28)
+        .linkColor(() => linkColorFn())
+        .onNodeClick(n => focusNode(n.id, { fly: true }))
+        .onBackgroundClick(() => { clearFocus(); closePanel(); });
+
+      if (THREE) {
+        graph.nodeThreeObject(n => nodeObject(n, THREE))
+             .nodeThreeObjectExtend(false);
+        addLights(THREE);
+        stars = addStarfield(THREE);
+      }
+
+      renderLegend();
+
+      // controls: stop drifting while the user is dragging the camera
+      const controls = graph.controls();
+      if (controls && controls.addEventListener) {
+        controls.addEventListener('start', () => pauseDrift(1e9));
+        controls.addEventListener('end', () => pauseDrift(6000));
+      }
+      graph.cameraPosition({ x: 0, y: 0, z: initialDistance() });
+
+      // fit once the layout settles, then start the idle drift
+      let fitted = false;
+      graph.onEngineStop(() => {
+        if (!fitted) {
+          fitted = true;
+          if (nodes.length > 1) graph.zoomToFit(1400, 90);
+          pauseDrift(600);
+        }
+      });
+      setTimeout(() => {
+        if (!fitted) { fitted = true; if (nodes.length > 1) graph.zoomToFit(1400, 90); }
+      }, 4000);
+
+      window.addEventListener('resize', resize);
+      resize();
+      requestAnimationFrame(loop);
+
+      const bootEl = document.getElementById('boot');
+      bootEl.classList.add('hidden');
+      setTimeout(() => bootEl.remove(), 1000);
+
+      document.getElementById('panel-close').addEventListener('click', () => {
+        closePanel(); clearFocus();
+      });
+
+      // boot greeting: shown immediately, spoken as soon as audio is unlocked
+      const greeting = window.greetingText();
+      pendingGreeting = greeting;
+      window.showAnswer({ answer: greeting });
+
+      window.dispatchEvent(new CustomEvent('dio:ready'));
+    };
+
+    /** "Good evening, sir. 12 notes indexed, all present and accounted for." */
+    window.greetingText = function greetingText() {
+      const n = nodes.length;
+      const hour = new Date().getHours();
+      const part = hour < 12 ? 'morning' : (hour < 18 ? 'afternoon' : 'evening');
+      return 'Good ' + part + ', sir. ' + n + ' note' + (n === 1 ? '' : 's') +
+             ' indexed, all present and accounted for.';
+    };
+
+    function initialDistance() {
+      if (nodes.length <= 1) return 70;    // a lone star should still read as a star
+      if (nodes.length <= 6) return 170;
+      return 420;
+    }
+    function resize() {
+      if (!graph) return;
+      graph.width(mount.clientWidth).height(mount.clientHeight);
+    }
+
+    /* ------------------------------------------------------------- visuals */
+    function addLights(THREE) {
+      const scene = graph.scene();
+      scene.add(new THREE.AmbientLight(0xffffff, 1.1));
+      const key = new THREE.DirectionalLight(0xbfe6ff, 1.3);
+      key.position.set(1, 1, 1);
+      const rim = new THREE.DirectionalLight(0xff9bd2, 0.5);
+      rim.position.set(-1, -0.6, -1);
+      scene.add(key, rim);
+    }
+
+    function radialTexture(THREE, inner, outer) {
+      const size = 128;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+      g.addColorStop(0, inner);
+      g.addColorStop(0.28, outer);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, size, size);
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    }
+
+    /* Node labels: drawn to a canvas, no extra library. Only when the graph is
+       small enough that they help instead of clutter. */
+    const SHOW_LABELS = nodes.length > 0 && nodes.length <= 60;
+
+    function makeLabelSprite(THREE, text, cssColor) {
+      const font = '500 44px ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+      const canvas = document.createElement('canvas');
+      let ctx = canvas.getContext('2d');
+      ctx.font = font;
+      const w = Math.ceil((ctx.measureText ? ctx.measureText(text).width : text.length * 22)) + 28;
+      const h = 64;
+      canvas.width = w;
+      canvas.height = h;
+      ctx = canvas.getContext('2d');            // re-set: resizing clears state
+      ctx.font = font;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.95)';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = cssColor;
+      ctx.fillText(text, w / 2, h / 2 + 2);
+      const tex = new THREE.CanvasTexture(canvas);
+      if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthWrite: false, opacity: 0.85
+      }));
+      const k = 0.115;                          // world units per canvas pixel
+      sprite.scale.set(w * k, h * k, 1);
+      return sprite;
+    }
+
+    /* ------------------------------------------------- chibi dino drawing */
+    /* Every note is a little chibi dinosaur, drawn to a canvas so the theme
+       costs no extra library and stays cheap no matter how many notes. */
+
+    function hexToHsl(hex) {
+      const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex).trim());
+      if (!m) return { h: 0, s: 0, l: 0.6 };
+      const r = parseInt(m[1], 16) / 255, g = parseInt(m[2], 16) / 255, b = parseInt(m[3], 16) / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h = 0, s = 0;
+      const l = (max + min) / 2;
+      const d = max - min;
+      if (d) {
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h /= 6;
+      }
+      return { h, s, l };
+    }
+
+    function shade(hex, dl, ds = 0) {
+      const c = hexToHsl(hex);
+      const l = Math.max(0.06, Math.min(0.94, c.l + dl));
+      const s = Math.max(0, Math.min(1, c.s + ds));
+      return 'hsl(' + Math.round(c.h * 360) + ',' + Math.round(s * 100) + '%,' + Math.round(l * 100) + '%)';
+    }
+
+    function drawChibiDino(ctx, S, body, belly, spike, ink) {
+      ctx.save();
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = ink;
+
+      const paint = (fill, fn) => {
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        fn();
+        ctx.fill();
+        if (fill !== belly && fill !== 'rgba(255,120,150,0.45)' && fill !== '#ffffff') ctx.stroke();
+      };
+
+      // tail
+      paint(body, () => {
+        ctx.moveTo(40, 74);
+        ctx.quadraticCurveTo(6, 62, 12, 96);
+        ctx.quadraticCurveTo(24, 92, 44, 100);
+        ctx.closePath();
+      });
+      // back spikes
+      [[46, 62], [58, 50], [70, 42]].forEach(([x, y]) => {
+        paint(spike, () => {
+          ctx.moveTo(x - 9, y + 8);
+          ctx.lineTo(x, y - 11);
+          ctx.lineTo(x + 10, y + 6);
+          ctx.closePath();
+        });
+      });
+      // legs
+      paint(body, () => ctx.ellipse(52, 104, 13, 10, 0, 0, Math.PI * 2));
+      paint(body, () => ctx.ellipse(80, 104, 13, 10, 0, 0, Math.PI * 2));
+      // body + belly
+      paint(body, () => ctx.ellipse(64, 80, 31, 27, 0, 0, Math.PI * 2));
+      paint(belly, () => ctx.ellipse(70, 90, 21, 17, 0, 0, Math.PI * 2));
+      // tiny arm
+      paint(body, () => ctx.ellipse(92, 82, 10, 6.5, -0.4, 0, Math.PI * 2));
+      // head + snout
+      paint(body, () => ctx.arc(96, 48, 24, 0, Math.PI * 2));
+      paint(body, () => ctx.ellipse(116, 56, 14, 10, 0.05, 0, Math.PI * 2));
+      // nostril
+      paint(ink, () => ctx.arc(124, 52, 2, 0, Math.PI * 2));
+      // big chibi eye
+      paint('#ffffff', () => ctx.arc(100, 42, 7.5, 0, Math.PI * 2));
+      paint('#1b2430', () => ctx.arc(102, 43, 3.6, 0, Math.PI * 2));
+      paint('#ffffff', () => ctx.arc(99.5, 40, 1.9, 0, Math.PI * 2));
+      // blush
+      paint('rgba(255,120,150,0.45)', () => ctx.ellipse(90, 55, 5, 3, 0, 0, Math.PI * 2));
+
+      ctx.restore();
+    }
+
+    window.__theme = { drawChibiDino, shade, hexToHsl };   // test hook
+
+    const DINO_TEX = new Map();
+    function dinoTexture(THREE, color) {
+      if (DINO_TEX.has(color)) return DINO_TEX.get(color);
+      const S = 140;
+      const canvas = document.createElement('canvas');
+      canvas.width = S;
+      canvas.height = S;
+      const ctx = canvas.getContext('2d');
+      drawChibiDino(ctx, S, color, shade(color, 0.16), shade(color, -0.14), 'rgba(20,16,26,0.92)');
+      const tex = new THREE.CanvasTexture(canvas);
+      if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+      DINO_TEX.set(color, tex);
+      return tex;
+    }
+
+    let GLOW_TEX = null;
+    function glowTexture(THREE) {
+      if (!GLOW_TEX) GLOW_TEX = radialTexture(THREE, 'rgba(255,255,255,0.95)', 'rgba(255,255,255,0.30)');
+      return GLOW_TEX;
+    }
+
+    function nodeObject(node, THREE) {
+      const color = new THREE.Color(colorFor(node.group));
+      const r = 3.0 + Math.min(4.0, 0.95 * Math.sqrt(node.degree || 0) + 0.7);
+      const g = new THREE.Group();
+
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(r * 0.5, 16, 16),
+        new THREE.MeshStandardMaterial({
+          color, emissive: color, emissiveIntensity: 0.8,
+          roughness: 0.35, metalness: 0.15, transparent: true, opacity: 0.98
+        })
+      );
+      const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(r * 1.7, 16, 16),
+        new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.12,
+          blending: THREE.AdditiveBlending, depthWrite: false
+        })
+      );
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowTexture(THREE), color, transparent: true, opacity: 0.55,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      }));
+      glow.scale.setScalar(r * 7);
+
+      // the chibi dinosaur itself
+      const hex = colorFor(node.group);
+      const dino = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: dinoTexture(THREE, hex), transparent: true, depthWrite: false, opacity: 1
+      }));
+      dino.scale.set(r * 3.4, r * 3.4, 1);
+      dino.position.set(0, r * 0.4, 0);
+
+      g.add(core, halo, glow, dino);
+
+      let label = null;
+      if (SHOW_LABELS) {
+        label = makeLabelSprite(THREE, node.label, '#f3e6d2');
+        label.position.set(0, r * 2.7, 0);
+        g.add(label);
+      }
+
+      node.__three = { core, halo, glow, dino, label, r };
+      return g;
+    }
+
+    function addStarfield(THREE, count = 2400, radius = 2600) {
+      const pos = new Float32Array(count * 3);
+      const col = new Float32Array(count * 3);
+      const tint = new THREE.Color();
+      for (let i = 0; i < count; i++) {
+        const r = radius * (0.5 + Math.random() * 0.5);
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        pos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+        pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        pos[i * 3 + 2] = r * Math.cos(phi);
+        // warm amber spores with a scattering of cool teal
+        const warm = Math.random() < 0.72;
+        tint.setHSL(warm ? 0.07 + Math.random() * 0.06 : 0.45 + Math.random() * 0.08,
+                    0.55 + Math.random() * 0.35,
+                    0.62 + Math.random() * 0.3);
+        col[i * 3] = tint.r; col[i * 3 + 1] = tint.g; col[i * 3 + 2] = tint.b;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const mat = new THREE.PointsMaterial({
+        size: 11, sizeAttenuation: true, vertexColors: true,
+        transparent: true, opacity: 0.9, depthWrite: false,
+        map: radialTexture(THREE, 'rgba(255,255,255,1)', 'rgba(255,255,255,0.45)'),
+        blending: THREE.AdditiveBlending
+      });
+      const points = new THREE.Points(geo, mat);
+      graph.scene().add(points);
+      return points;
+    }
+
+    /* --------------------------------------------------------------- focus */
+    function linkColorFn() {
+      return (l) => {
+        if (!focusSet) return BASE_LINK;
+        const a = idOf(l.source), b = idOf(l.target);
+        return (focusSet.has(a) && focusSet.has(b)) ? HOT_LINK : DIM_LINK;
+      };
+    }
+
+    function paint() {
+      const idle = !focusSet;
+      for (const n of nodes) {
+        const t = n.__three;
+        if (!t) continue;
+        const live    = idle || focusSet.has(n.id);
+        const primary = focusPrimary !== null && n.id === focusPrimary;
+        t.core.material.opacity = idle ? 1 : (live ? 1 : 0.14);
+        t.core.material.emissiveIntensity = idle ? 0.75 : (primary ? 2.1 : (live ? 1.4 : 0.4));
+        t.halo.material.opacity = idle ? 0.10 : (primary ? 0.40 : (live ? 0.26 : 0.02));
+        t.glow.material.opacity = idle ? 0.55 : (primary ? 1.0 : (live ? 0.8 : 0.05));
+        if (t.dino) t.dino.material.opacity = idle ? 1 : (live ? 1 : 0.16);
+        if (t.label) t.label.material.opacity = idle ? 0.85 : (live ? 0.95 : 0.10);
+        if (!t.pulsing) t.glow.scale.setScalar(t.r * (primary ? 10 : 7));
+      }
+      if (graph) graph.linkColor(linkColorFn());
+    }
+
+    /** Highlight a set of nodes; `primary` (if given) burns brightest. */
+    function setFocus(ids, primary = null) {
+      focusSet = ids && ids.length ? new Set(ids) : null;
+      focusPrimary = (primary === null || primary === undefined) ? null : primary;
+      paint();
+    }
+
+    function clearFocus() { setFocus(null); }
+
+    /** Focus + fly + panel. */
+    function focusNode(id, opts = {}) {
+      const node = byId.get(id);
+      if (!node) return;
+      const neighbours = [...(adj.get(id) || [])];
+      setFocus([id, ...neighbours], id);
+      openPanel(node);
+      if (opts.fly !== false) flyTo(node, opts.distance || 110);
+      window.dispatchEvent(new CustomEvent('dio:focus', { detail: { id } }));
+    }
+
+    function flyTo(node, distance = 110) {
+      if (!graph) return;
+      const x = node.x || 0, y = node.y || 0, z = node.z || 0;
+      const d = Math.hypot(x, y, z);
+      let pos;
+      if (d < 1) {
+        pos = { x: 0, y: 0, z: distance };
+      } else {
+        const ratio = 1 + distance / d;
+        pos = { x: x * ratio, y: y * ratio, z: z * ratio };
+      }
+      graph.cameraPosition(pos, { x, y, z }, 2200);
+      pauseDrift(45000);
+    }
+
+    /** Frame a whole cluster instead of flying to a single node. */
+    function frameSet(ids, padding = 130) {
+      if (!graph || !ids.length) return;
+      const set = new Set(ids);
+      graph.zoomToFit(1500, padding, (n) => set.has(n.id));
+      pauseDrift(45000);
+    }
+
+    /* -------------------------------------------------------------- legend */
+    function renderLegend() {
+      const groups = [...new Set(nodes.map(n => n.group))].sort();
+      legend.innerHTML = groups.map(g =>
+        `<div class="row"><span class="dot" style="color:${colorFor(g)}"></span>${esc(g)}</div>`
+      ).join('');
+    }
+
+    /* --------------------------------------------------------------- panel */
+    function openPanel(node) {
+      document.getElementById('panel-group').textContent = node.group || 'notes';
+      document.getElementById('panel-group').style.color = colorFor(node.group);
+      document.getElementById('panel-title').textContent = node.label;
+      document.getElementById('panel-meta').textContent =
+        `${node.words || 0} words · ${node.path || ''}`;
+      document.getElementById('panel-body').textContent = node.excerpt || '(empty note)';
+
+      const chips = document.getElementById('panel-chips');
+      const neighbours = [...(adj.get(node.id) || [])];
+      chips.innerHTML = '';
+      if (!neighbours.length) {
+        const span = document.createElement('span');
+        span.style.cssText = 'font-size:12px;color:var(--muted)';
+        span.textContent = 'No links yet — this one is an island.';
+        chips.appendChild(span);
+      } else {
+        for (const nid of neighbours) {
+          const other = byId.get(nid);
+          if (!other) continue;
+          const b = document.createElement('button');
+          b.textContent = other.label;
+          b.style.borderColor = colorFor(other.group);
+          b.addEventListener('click', () => focusNode(nid));
+          chips.appendChild(b);
+        }
+      }
+      panel.classList.add('open');
+      panel.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('panel-open');
+    }
+
+    function closePanel() {
+      panel.classList.remove('open');
+      panel.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('panel-open');
+    }
+
+    /* ---------------------------------------------------------- animation */
+    let lastT = performance.now();
+    function loop() {
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - lastT) / 1000);
+      lastT = now;
+
+      if (stars) stars.rotation.y += dt * 0.004;
+
+      // chibi idle: each dinosaur breathes on its own clock
+      const clock = now / 1000;
+      for (const n of nodes) {
+        const o = n.__three;
+        if (!o || !o.dino || o.pulsing) continue;
+        const bob = Math.sin(clock * 1.6 + n.id * 1.3);
+        o.dino.position.y = o.r * 0.4 + bob * o.r * 0.12;
+        o.dino.scale.set(o.r * 3.4, o.r * 3.4 + bob * o.r * 0.14, 1);
+      }
+
+      if (graph && now > driftUntil) {
+        const cam = graph.cameraPosition();
+        const dist = Math.hypot(cam.x, cam.z) || 300;
+        driftAngle += dt * 0.045;
+        graph.cameraPosition({
+          x: Math.sin(driftAngle) * dist,
+          y: cam.y,
+          z: Math.cos(driftAngle) * dist
+        });
+      }
+
+      const alive = [];
+      for (const p of pulses) {
+        const t = p.node.__three;
+        if (now >= p.until) {                       // pulse over - restore the node
+          if (t) {
+            t.pulsing = false;
+            t.glow.scale.setScalar(t.r * 7);
+            t.glow.material.opacity = 0.55;
+          }
+          continue;
+        }
+        alive.push(p);
+        if (!t) continue;
+        t.pulsing = true;
+        const k = Math.sin((1 - (p.until - now) / p.duration) * Math.PI);
+        t.glow.scale.setScalar(t.r * (7 + 6 * k));
+        t.glow.material.opacity = 0.55 + 0.45 * k;
+      }
+      pulses = alive;
+      requestAnimationFrame(loop);
+    }
+
+    /** Give a node a brief "just born" glow pulse (Stage 6). */
+    window.pulseNode = function (id, ms = 2600) {
+      const node = byId.get(id);
+      if (!node) return;
+      pulses.push({ node, until: performance.now() + ms, duration: ms });
+    };
+
+    /* ------------------------------------------------------------------ ask */
+    const dockForm  = document.getElementById('ask');
+    const dockInput = document.getElementById('q');
+    const answerBox = document.getElementById('answer');
+    const answerText = document.getElementById('answer-text');
+    const answerSrc  = document.getElementById('answer-sources');
+    const statusEl   = document.getElementById('status');
+
+    let sessionId = '';
+    try { sessionId = localStorage.getItem('dio.session') || ''; } catch (e) {}
+
+    window.setStatus = function (msg) {
+      statusEl.textContent = msg || '';
+      statusEl.classList.toggle('on', !!msg);
+    };
+
+    window.showAnswer = function (data) {
+      answerText.textContent = (data && data.answer) || '(silence)';
+      answerSrc.innerHTML = '';
+      const titles = (data && data.titles) || [];
+      const ids = (data && data.nodes) || [];
+      if (titles.length) {
+        const label = document.createElement('span');
+        label.className = 'src-label';
+        label.textContent = ids.length >= CLUSTER_MIN ? 'drawn from' : 'from';
+        answerSrc.appendChild(label);
+        titles.forEach((t, i) => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'src src-link';
+          chip.textContent = t;
+          chip.title = 'Fly to this note';
+          if (Number.isInteger(ids[i]) && byId.has(ids[i])) {
+            chip.addEventListener('click', () => focusNode(ids[i]));
+          }
+          answerSrc.appendChild(chip);
+        });
+      }
+      answerBox.classList.add('show');
+    };
+
+    window.ask = function ask(text) {
+      text = String(text || '').trim();
+      if (!text) return Promise.resolve(null);
+      if (rememberMatch(text)) return window.remember(text);   // Stage 6
+      dockInput.value = '';
+      window.setStatus('thinking…');
+      const payload = { question: text, session: sessionId };
+      return fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.session) {
+            sessionId = data.session;
+            try { localStorage.setItem('dio.session', sessionId); } catch (e) {}
+          }
+          window.showAnswer(data);
+          window.setStatus('');
+          window.dispatchEvent(new CustomEvent('dio:answer', { detail: data }));
+          return data;
+        })
+        .catch(() => {
+          window.showAnswer({ answer: 'Apologies, sir — I could not reach the brain. Is server.py still running?' });
+          window.setStatus('');
+          return null;
+        });
+    };
+
+    dockForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      window.ask(dockInput.value);
+    });
+
+    /* -------------------------------------------------------------- voice */
+    /* Everything here is free and built into the browser: speechSynthesis for
+       the mouth, webkitSpeechRecognition for the ear. */
+    const synth = (typeof speechSynthesis !== 'undefined') ? window.speechSynthesis : null;
+    const micBtn = document.getElementById('mic');
+    const voiceBtn = document.getElementById('voice');
+
+    let voice = null;          // chosen SpeechSynthesisVoice
+    let audioReady = false;    // has the user interacted yet?
+    let voiceOn = true;
+    try { voiceOn = localStorage.getItem('dio.voice') !== 'off'; } catch (e) {}
+
+    function pickVoice() {
+      if (!synth) return;
+      const voices = synth.getVoices() || [];
+      if (!voices.length) return;
+      const en = voices.filter(v => /^en/i.test(v.lang || ''));
+      voice =
+        // a British voice if the system has one, any English voice otherwise
+        en.find(v => /^en[-_]GB/i.test(v.lang || '')) ||
+        en.find(v => /gb/i.test(v.name || '')) ||
+        en.find(v => /^en[-]?US/i.test(v.lang || '')) ||
+        en[0] || voices[0] || null;
+      if (voice) console.log('DIO voice:', voice.name, voice.lang);
+    }
+    if (synth) {
+      pickVoice();
+      try {
+        synth.addEventListener('voiceschanged', pickVoice);
+      } catch (e) {
+        synth.onvoiceschanged = pickVoice;   // older Safari
+      }
+      setTimeout(pickVoice, 400);   // some browsers populate the list late
+    }
+
+    /** Browsers block audio until the user interacts - unlock on first gesture. */
+    window.unlockAudio = function unlockAudio() {
+      if (!synth || audioReady) return;
+      audioReady = true;
+      try {
+        synth.cancel();
+        const warm = new SpeechSynthesisUtterance(' ');
+        warm.volume = 0;
+        warm.lang = voice ? voice.lang : 'en-GB';
+        synth.speak(warm);
+        synth.resume();
+      } catch (e) { /* some browsers throw before the first real gesture */ }
+      pickVoice();
+      if (!voiceReadyHintShown) hideVoiceHint();
+      // the boot greeting waits for this moment - browsers block audio until now
+      if (pendingGreeting) {
+        const greeting = pendingGreeting;
+        pendingGreeting = null;
+        setTimeout(() => window.speak(greeting), 150);
+      }
+    };
+    ['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
+      window.addEventListener(evt, window.unlockAudio, { capture: true }));
+
+    let voiceReadyHintShown = true;
+    function hideVoiceHint() {
+      voiceReadyHintShown = false;
+      if (statusEl.textContent === 'click anywhere to enable voice') {
+        window.setStatus('');
+      }
+    }
+    if (synth && !audioReady) {
+      window.setStatus('click anywhere to enable voice');
+      voiceReadyHintShown = true;
+    }
+
+    window.speak = function speak(text) {
+      if (!synth || !text) return;
+      if (!voiceOn) return;
+      if (!audioReady) window.unlockAudio();
+      synth.cancel();                       // never queue up a backlog
+      const u = new SpeechSynthesisUtterance(String(text));
+      if (voice) u.voice = voice;
+      u.lang = (voice && voice.lang) || 'en-GB';
+      u.rate = 0.97;
+      u.pitch = 0.92;
+      u.volume = 1;
+      // Chrome sometimes swallows speech spoken in the same tick as cancel()
+      setTimeout(() => { try { synth.speak(u); synth.resume(); } catch (e) {} }, 60);
+    };
+
+    window.stopSpeaking = function stopSpeaking() {
+      if (synth) { try { synth.cancel(); } catch (e) {} }
+    };
+
+    voiceBtn.addEventListener('click', () => {
+      voiceOn = !voiceOn;
+      try { localStorage.setItem('dio.voice', voiceOn ? 'on' : 'off'); } catch (e) {}
+      voiceBtn.textContent = voiceOn ? '🔊' : '🔇';
+      voiceBtn.classList.toggle('muted', !voiceOn);
+      voiceBtn.title = voiceOn ? 'Mute Dio' : 'Unmute Dio';
+      if (!voiceOn) window.stopSpeaking(); else window.speak('Voice restored, sir.');
+    });
+    voiceBtn.textContent = voiceOn ? '🔊' : '🔇';
+    voiceBtn.classList.toggle('muted', !voiceOn);
+
+    /* ------------------------------------------------------------- the ear */
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let rec = null;
+    let listening = false;
+
+    if (SpeechRec) {
+      micBtn.hidden = false;
+      rec = new SpeechRec();
+      rec.lang = 'en-GB';
+      rec.interimResults = false;
+      rec.continuous = false;
+      rec.maxAlternatives = 1;
+
+      rec.onstart = () => {
+        listening = true;
+        micBtn.classList.add('active');
+        window.stopSpeaking();
+        window.setStatus('listening…');
+      };
+      rec.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        transcript = transcript.trim();
+        if (transcript) window.ask(transcript);   // same /chat flow as typing
+      };
+      rec.onerror = (event) => {
+        listening = false;
+        micBtn.classList.remove('active');
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          window.setStatus('microphone blocked — allow it in the address bar');
+        } else if (event.error === 'no-speech') {
+          window.setStatus('didn’t catch that, sir');
+        } else if (event.error !== 'aborted') {
+          window.setStatus('mic error: ' + event.error);
+        } else {
+          window.setStatus('');
+        }
+      };
+      rec.onend = () => {
+        listening = false;
+        micBtn.classList.remove('active');
+        if (statusEl.textContent === 'listening…') window.setStatus('');
+      };
+
+      micBtn.addEventListener('click', () => {
+        window.unlockAudio();
+        if (listening) { try { rec.stop(); } catch (e) {} return; }
+        window.stopSpeaking();
+        try { rec.start(); } catch (e) { window.setStatus('mic busy — try again'); }
+      });
+    }
+
+    /* ------------------------------------------------------- total recall */
+    /* "remember that ..." writes a real markdown note and grows the galaxy. */
+    const REMEMBER_RE = /^\s*remember(?:\s+(?:that|to))?\s*[:\-]?\s*/i;
+
+    function rememberMatch(text) {
+      const m = REMEMBER_RE.exec(String(text || ''));
+      if (!m) return null;
+      const rest = String(text).slice(m[0].length).trim();
+      return rest.length ? rest : null;
+    }
+
+    /** Re-sync with the freshly built graph and splice the new note in live. */
+    function adoptNewNote(data) {
+      const idByPath = new Map((data.index || []).map(e => [e.path, e.id]));
+      const pathById = new Map(nodes.map(n => [n.id, n.path]));
+
+      // ids are positions in the rebuilt array, so existing notes can shift
+      for (const n of nodes) {
+        const nid = idByPath.get(n.path);
+        if (nid !== undefined) n.id = nid;
+      }
+      const remapped = links.map(l => {
+        const sp = pathById.get(idOf(l.source));
+        const tp = pathById.get(idOf(l.target));
+        return {
+          source: (sp !== undefined && idByPath.has(sp)) ? idByPath.get(sp) : idOf(l.source),
+          target: (tp !== undefined && idByPath.has(tp)) ? idByPath.get(tp) : idOf(l.target)
+        };
+      });
+      links.length = 0;
+      links.push(...remapped);
+
+      byId.clear(); adj.clear();
+      for (const n of nodes) { byId.set(n.id, n); adj.set(n.id, new Set()); }
+
+      // born next to the note it is most related to
+      const node = Object.assign({}, data.node);
+      const parent = (data.related !== null && data.related !== undefined)
+        ? byId.get(data.related) : null;
+      const jitter = () => (Math.random() - 0.5) * 18;
+      if (parent) {
+        node.x = (parent.x || 0) + jitter();
+        node.y = (parent.y || 0) + jitter();
+        node.z = (parent.z || 0) + jitter();
+      } else {
+        // nothing related: born in the middle of the galaxy, not off in the void
+        let sx = 0, sy = 0, sz = 0, c = 0;
+        for (const n of nodes) {
+          if (Number.isFinite(n.x)) { sx += n.x; sy += n.y; sz += n.z; c++; }
+        }
+        if (c) {
+          node.x = sx / c + jitter();
+          node.y = sy / c + jitter();
+          node.z = sz / c + jitter();
+        }
+      }
+      nodes.push(node);
+      byId.set(node.id, node);
+      adj.set(node.id, new Set());
+      for (const l of (data.links || [])) links.push({ source: l.source, target: l.target });
+
+      for (const l of links) {
+        const a = idOf(l.source), b = idOf(l.target);
+        if (adj.has(a)) adj.get(a).add(b);
+        if (adj.has(b)) adj.get(b).add(a);
+      }
+
+      graph.graphData({ nodes, links });
+      renderLegend();
+      document.getElementById('stat-notes').textContent = nodes.length;
+      document.getElementById('stat-links').textContent = links.length;
+
+      // the three.js object exists from the next frame - wait for it, then glow
+      let tries = 0;
+      (function born() {
+        const n = byId.get(node.id);
+        if ((n && n.__three) || tries++ > 24) {
+          window.pulseNode(node.id, 2800);
+          focusNode(node.id);
+        } else {
+          setTimeout(born, 50);
+        }
+      })();
+    }
+
+    window.remember = function remember(text) {
+      window.setStatus('remembering…');
+      return fetch('/remember', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      })
+        .then(r => r.json())
+        .then(data => {
+          window.setStatus('');
+          if (!data || !data.ok) {
+            window.showAnswer({ answer: (data && data.error) || 'I could not file that, sir.' });
+            return data;
+          }
+          adoptNewNote(data);
+          window.showAnswer({ answer: data.said, titles: [data.title], nodes: [data.id] });
+          window.speak(window.speakable(data.said));
+          return data;
+        })
+        .catch(() => {
+          window.showAnswer({ answer: 'That never reached the filing cabinet, sir.' });
+          window.setStatus('');
+          return null;
+        });
+    };
+
+    /* speak every answer out loud - the note itself stays on screen */
+    window.speakable = function speakable(text) {
+      let s = String(text || '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`([^`]*)`/g, '$1')
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+        .replace(/[*_~>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (s.length > 700) {                     // never monologue
+        const cut = s.slice(0, 700);
+        const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+        s = stop > 200 ? cut.slice(0, stop + 1) : cut.trimEnd() + '.';
+      }
+      return s;
+    };
+
+    window.addEventListener('dio:answer', (e) => {
+      const data = e.detail || {};
+      if (data.answer) window.speak(window.speakable(data.answer));
+    });
+
+    /* ------------------------------------------------- fly to the source */
+    /* When Dio answers from a note, prove it: fly to the top source,
+       light it and its neighbours, and open its panel. If the answer drew on
+       four or more notes, light the whole cluster and frame it instead.
+       Small talk returns no nodes, so the camera stays exactly where it is. */
+    window.addEventListener('dio:answer', (e) => {
+      const data = e.detail || {};
+      const ids = (data.nodes || []).filter(i => Number.isInteger(i) && byId.has(i));
+      if (!ids.length) return;
+
+      if (ids.length >= CLUSTER_MIN) {
+        const cluster = new Set();
+        for (const id of ids) {
+          cluster.add(id);
+          for (const nb of (adj.get(id) || [])) cluster.add(nb);
+        }
+        setFocus([...cluster], ids[0]);
+        openPanel(byId.get(ids[0]));
+        frameSet([...cluster]);
+      } else {
+        focusNode(ids[0]);
+      }
+    });
+
+    /* ------------------------------------------------------------ settings */
+    /* Paste an OpenRouter or Groq key, list the models it unlocks, pick one. */
+    const settingsEl = document.getElementById('settings');
+    const keyBlocksEl = document.getElementById('key-blocks');
+    const providerSeg = document.getElementById('provider-seg');
+    const modelInput = document.getElementById('model-input');
+    const modelsEl = document.getElementById('models');
+    const modelsMsg = document.getElementById('models-msg');
+
+    let cfgState = { provider: 'cli', model: '', available: [], keys: {} };
+    let chosenProvider = null;
+    let chosenModel = '';
+
+    function providerLabel(name) {
+      return { openrouter: 'OpenRouter', groq: 'Groq', anthropic: 'Anthropic', cli: 'claude -p (no key)' }[name] || name;
+    }
+
+    function renderKeyBlock(name) {
+      const info = (cfgState.keys || {})[name] || {};
+      const wrap = document.createElement('div');
+      const label = document.createElement('label');
+      label.textContent = providerLabel(name) + ' API key';
+      const row = document.createElement('div');
+      row.className = 'keyrow';
+      const input = document.createElement('input');
+      input.type = 'password';
+      input.id = 'key-' + name;
+      input.placeholder = info.saved ? (info.masked + '  (saved — type to replace)') : 'sk-or-v1-…  /  gsk_…';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      const eye = document.createElement('button');
+      eye.type = 'button';
+      eye.className = 'ghost';
+      eye.textContent = 'show';
+      eye.addEventListener('click', () => {
+        input.type = input.type === 'password' ? 'text' : 'password';
+        eye.textContent = input.type === 'password' ? 'show' : 'hide';
+      });
+      row.append(input, eye);
+      wrap.append(label, row);
+      if (info.saved) {
+        const saved = document.createElement('div');
+        saved.className = 'saved';
+        saved.textContent = '✓ saved: ' + info.masked;
+        wrap.appendChild(saved);
+      }
+      return wrap;
+    }
+
+    function renderProviderSeg() {
+      providerSeg.innerHTML = '';
+      const options = ['openrouter', 'groq', 'anthropic', 'cli'];
+      for (const name of options) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = providerLabel(name);
+        if (chosenProvider === name) b.className = 'on';
+        b.addEventListener('click', () => {
+          chosenProvider = name;
+          renderProviderSeg();
+          modelsEl.innerHTML = '';
+          modelsMsg.textContent = (name === 'openrouter' || name === 'groq')
+            ? 'Press “Show models” to fetch what this key can reach.'
+            : '';
+          modelsMsg.className = '';
+        });
+        providerSeg.appendChild(b);
+      }
+    }
+
+    function renderModels(models, current) {
+      modelsEl.innerHTML = '';
+      models.forEach((m) => {
+        const row = document.createElement('div');
+        row.className = 'm' + (m.id === current ? ' on' : '');
+        const id = document.createElement('b');
+        id.textContent = m.id;
+        const meta = document.createElement('span');
+        const bits = [];
+        if (m.context) bits.push(Math.round(m.context / 1000) + 'k ctx');
+        if (m.prompt) bits.push('$' + m.prompt);
+        meta.textContent = bits.join(' · ');
+        row.append(id, meta);
+        row.addEventListener('click', () => {
+          chosenModel = m.id;
+          modelInput.value = m.id;
+          renderModels(models, chosenModel);
+        });
+        modelsEl.appendChild(row);
+      });
+    }
+
+    function setModelsMsg(text, kind) {
+      modelsMsg.textContent = text;
+      modelsMsg.className = kind || '';
+    }
+
+    async function loadModels() {
+      const key = (document.getElementById('key-' + chosenProvider) || {}).value || '';
+      modelsEl.innerHTML = '';
+      setModelsMsg('fetching models from ' + providerLabel(chosenProvider) + '…');
+      try {
+        const res = await fetch('/models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: chosenProvider, key: key.trim() })
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          setModelsMsg(data.error || 'Could not list models.', 'err');
+          return;
+        }
+        if (!data.models.length) {
+          setModelsMsg('No models matched.', 'err');
+          return;
+        }
+        renderModels(data.models, modelInput.value);
+        setModelsMsg(data.count + ' models available. Click one to use it.  ' + (data.help || ''), 'ok');
+      } catch (e) {
+        setModelsMsg('Could not reach the server (' + e + ').', 'err');
+      }
+    }
+
+    async function openSettings() {
+      settingsEl.classList.add('open');
+      modelsEl.innerHTML = '';
+      setModelsMsg('');
+      try {
+        const res = await fetch('/config');
+        const data = await res.json();
+        if (data && data.config) {
+          cfgState = data.config;
+          chosenProvider = cfgState.provider === 'auto' ? 'openrouter' : cfgState.provider;
+          modelInput.value = cfgState.model || '';
+          chosenModel = cfgState.model || '';
+        }
+      } catch (e) {
+        setModelsMsg('Could not read settings from the server (' + e + ').', 'err');
+        chosenProvider = chosenProvider || 'openrouter';
+      }
+      keyBlocksEl.innerHTML = '';
+      keyBlocksEl.append(renderKeyBlock('openrouter'), renderKeyBlock('groq'));
+      renderProviderSeg();
+      const note = document.getElementById('settings-note');
+      if (note) {
+        note.textContent = 'Anthropic uses the api_key field in config.json. '
+          + 'Keys travel only to your own machine (localhost) and are stored in '
+          + 'config.json, which is git-ignored.';
+      }
+    }
+
+    function closeSettings() { settingsEl.classList.remove('open'); }
+
+    async function saveSettings() {
+      const payload = {
+        provider: chosenProvider,
+        model: modelInput.value.trim(),
+        openrouter_key: (document.getElementById('key-openrouter') || {}).value || '',
+        groq_key: (document.getElementById('key-groq') || {}).value || ''
+      };
+      // empty means "leave the saved one alone"
+      if (!payload.openrouter_key) payload.openrouter_key = '____UNCHANGED____';
+      if (!payload.groq_key) payload.groq_key = '____UNCHANGED____';
+      try {
+        const res = await fetch('/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          setModelsMsg(data.error || 'Could not save.', 'err');
+          return;
+        }
+        cfgState = data.config;
+        setModelsMsg('Saved. ' + providerLabel(data.config.provider) + ' · '
+                     + (data.config.resolved_model || data.config.model), 'ok');
+        setTimeout(closeSettings, 900);
+      } catch (e) {
+        setModelsMsg('Could not save (' + e + ').', 'err');
+      }
+    }
+
+    document.getElementById('settings-btn').addEventListener('click', openSettings);
+    document.getElementById('settings-cancel').addEventListener('click', closeSettings);
+    document.getElementById('load-models').addEventListener('click', loadModels);
+    document.getElementById('settings-save').addEventListener('click', saveSettings);
+    settingsEl.addEventListener('click', (e) => {
+      if (e.target === settingsEl) closeSettings();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && settingsEl.classList.contains('open')) closeSettings();
+    });
+
+    /* ---------------------------------------------------------------- go */
+    window.boot = boot;                 // used by the UMD fallback
+    try {
+      boot(ForceGraph3D, THREE);
+    } catch (err) {
+      window.showBootError('The galaxy failed to start', String((err && err.message) || err));
+      throw err;
+    }
+  </script>
+</body>
+</html>

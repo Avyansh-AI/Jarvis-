@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# JARVIS — .gitignore
+#
+# SECURITY FIRST: config.json holds your Anthropic API key. It must NEVER
+# enter git history. It is created in Stage 2 and is ignored from here on,
+# before the file is ever written to disk.
+# ---------------------------------------------------------------------------
+config.json
+config.json.*
+*.env
+.env
+.env.*
+secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local scratch
+*.log
+.captures-tmp/
